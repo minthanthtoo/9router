@@ -156,7 +156,9 @@ export async function getKimiUsage(
     const quotas = {};
     const usageObj = data?.usage && typeof data.usage === "object" ? data.usage : {};
     const usageLimit = toFiniteNumber(usageObj.limit ?? usageObj.Limit, 0);
-    const usageUsed = toFiniteNumber(usageObj.used ?? usageObj.Used, 0);
+    const rawUsed = usageObj.used ?? usageObj.Used;
+    const hasKnownUsed = (typeof rawUsed === "number" || typeof rawUsed === "string" && rawUsed.trim() !== "") && Number.isFinite(Number(rawUsed)) && Number(rawUsed) >= 0;
+    const usageUsed = hasKnownUsed ? Number(rawUsed) : 0;
     const usageRemainingRaw = usageObj.remaining ?? usageObj.Remaining;
     const usageRemaining =
       usageRemainingRaw != null && usageRemainingRaw !== ""
@@ -166,12 +168,12 @@ export async function getKimiUsage(
       usageObj.resetTime || usageObj.ResetTime || usageObj.reset_at || usageObj.resetAt;
 
     if (usageLimit > 0) {
-      quotas.Weekly = makeQuota({
+      quotas.Weekly = { ...makeQuota({
         used: usageUsed,
         total: usageLimit,
         remaining: Number.isFinite(usageRemaining) ? usageRemaining : null,
         resetAt: parseResetTime(usageResetTime),
-      });
+      }), quotaStatus: hasKnownUsed || Number.isFinite(usageRemaining) ? "reported" : "unknown" };
     }
 
     const limitsArray = Array.isArray(data?.limits) ? data.limits : [];
@@ -181,8 +183,8 @@ export async function getKimiUsage(
       const limit = toFiniteNumber(detail.limit ?? detail.Limit, 0);
       const remaining = toFiniteNumber(detail.remaining ?? detail.Remaining, NaN);
       const resetTime = detail.resetTime || detail.reset_at || detail.resetAt;
-      if (limit > 0) {
-        const rem = Number.isFinite(remaining) ? remaining : Math.max(0, limit);
+      if (limit > 0 && Number.isFinite(remaining)) {
+        const rem = remaining;
         quotas.Ratelimit = makeQuota({
           used: Math.max(0, limit - rem),
           total: limit,

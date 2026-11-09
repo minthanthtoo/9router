@@ -43,10 +43,12 @@ function formatCodexWindow(window) {
   const used = Math.max(0, Math.min(100, toFiniteNumber(window?.used_percent ?? window?.percent_used, 0)));
   return {
     used,
+    quotaStatus: typeof (window?.used_percent ?? window?.percent_used) === "number" && Number.isFinite(window?.used_percent ?? window?.percent_used) && (window?.used_percent ?? window?.percent_used) >= 0 && (window?.used_percent ?? window?.percent_used) <= 100 ? "reported" : "unknown",
     total: 100,
     remaining: Math.max(0, 100 - used),
     resetAt: parseResetTime(window?.reset_at ?? window?.resets_at ?? window?.resetAt ?? null),
     unlimited: false,
+    windowSeconds: Number.isSafeInteger(window?.limit_window_seconds) && window.limit_window_seconds > 0 ? window.limit_window_seconds : null,
   };
 }
 
@@ -104,6 +106,26 @@ function getCodexSparkRateLimit(data) {
   }) || null;
 }
 
+const CODEX_IMAGE_LIMIT_IDS = ["image_gen", "imagegen_premium"];
+export function getCodexImageQuotaWindows(data, now = Date.now()) {
+  const result={};
+  for(const id of CODEX_IMAGE_LIMIT_IDS){
+    const candidates=[data?.rate_limits_by_limit_id?.[id],...(Array.isArray(data?.additional_rate_limits)?data.additional_rate_limits.filter(row=>[row?.limit_id,row?.limit_name,row?.metered_feature].includes(id)):[])];
+    const snapshot=candidates.find(value=>value&&typeof value==='object'&&!Array.isArray(value));
+    if(!snapshot)continue;
+    const limits=getCodexRateLimitBody(snapshot);
+    for(const [kind,window] of [["primary",limits?.primary_window||limits?.primary],["secondary",limits?.secondary_window||limits?.secondary]]){
+      const percent=window?.used_percent ?? window?.percent_used;
+      if(typeof percent!=="number"||!Number.isFinite(percent)||percent<0||percent>100)continue;
+      const seconds=window.limit_window_seconds ?? (Number.isFinite(window.limit_window_minutes)?window.limit_window_minutes*60:null);
+      const formatted=formatCodexWindow(window);
+      if(!formatted.resetAt && typeof window.reset_after_seconds === "number" && Number.isFinite(window.reset_after_seconds) && window.reset_after_seconds > 0 && window.reset_after_seconds <= 31536000)formatted.resetAt=new Date(now+Math.ceil(window.reset_after_seconds*1000)).toISOString();
+      result[`${id}_${kind}`]={...formatted,quotaKind:"image_generation",limitId:id,windowSeconds:Number.isSafeInteger(seconds)&&seconds>0&&seconds<=31536000?seconds:null};
+    }
+  }
+  return result;
+}
+
 export async function getCodexUsage(accessToken, proxyOptions = null) {
   try {
     const response = await proxyAwareFetch(CODEX_CONFIG.usageUrl, {
@@ -124,10 +146,13 @@ export async function getCodexUsage(accessToken, proxyOptions = null) {
     const sparkRateLimit = getCodexSparkRateLimit(data);
     const availableResetCredits = Math.max(0, toFiniteNumber(data.rate_limit_reset_credits?.available_count, 0));
     const quotas = {};
+    const limitIds = [...Object.keys(data.rate_limits_by_limit_id || {}), ...(Array.isArray(data.additional_rate_limits) ? data.additional_rate_limits.flatMap(row => [row?.limit_id, row?.limit_name, row?.metered_feature]) : [])]
+      .filter(id => typeof id === "string" && /^[a-z][a-z0-9_.-]{0,47}$/.test(id) && !/[a-z0-9]{28}/.test(id));
 
     appendCodexQuotaWindows(quotas, "", normalRateLimit);
     appendCodexQuotaWindows(quotas, "review", reviewRateLimit);
     appendCodexQuotaWindows(quotas, "spark", sparkRateLimit);
+    Object.assign(quotas,getCodexImageQuotaWindows(data));
 
     return {
       plan: data.plan_type || data.summary?.plan || "unknown",
@@ -136,6 +161,7 @@ export async function getCodexUsage(accessToken, proxyOptions = null) {
       sparkLimitReached: getCodexRateLimitBody(sparkRateLimit)?.limit_reached || false,
       resetCredits: { availableCount: availableResetCredits },
       quotas,
+      quotaAudit: { limitIds: [...new Set(limitIds)].slice(0, 50) },
     };
   } catch (error) {
     throw new Error(`Failed to fetch Codex usage: ${error.message}`);

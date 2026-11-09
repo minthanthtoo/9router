@@ -18,6 +18,17 @@ describe("checkFallbackError — request-scoped vs account-scoped failures", () 
     expect(result).toEqual({ shouldFallback: false, cooldownMs: 0, requestScoped: true });
   });
 
+  it("rotates after a Codex unsupported-model 400 without assigning a quota cooldown", () => {
+    const result = checkFallbackError(
+      400,
+      "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.",
+      0,
+      "codex",
+    );
+
+    expect(result).toEqual({ shouldFallback: true, cooldownMs: 0 });
+  });
+
   it("still falls back for account-scoped statuses", () => {
     for (const status of [401, 402, 403, 404, 429]) {
       expect(checkFallbackError(status, "nope").shouldFallback).toBe(true);

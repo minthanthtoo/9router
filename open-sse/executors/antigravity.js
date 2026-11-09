@@ -115,6 +115,14 @@ export class AntigravityExecutor extends BaseExecutor {
     super("antigravity", PROVIDERS.antigravity);
   }
 
+  // Image generation uses an account-scoped quota bucket. Return the first
+  // throttled image response to the image router so it can classify and rotate
+  // accounts instead of replaying the same call against another URL surface.
+  shouldRetry(status, urlIndex, model) {
+    if (isImageModel(model) && status === HTTP_STATUS.RATE_LIMITED) return false;
+    return super.shouldRetry(status, urlIndex);
+  }
+
   // Parse Antigravity quota error to extract precise resetsAtMs from ErrorInfo/RetryInfo
   parseError(response, bodyText) {
     if ((response.status === 429 || response.status === 409) && bodyText) {
@@ -182,14 +190,15 @@ export class AntigravityExecutor extends BaseExecutor {
       // Strip model name suffixes for the actual API model name
       const cleanModel = model.replace(/-(\d+)x(\d+)$/, "");
 
-      // Build simplified contents — keep text and inlineData (reference images), merge all user messages
+      // Keep edit references through the image envelope transformation.
       const contents = [];
       const srcContents = body.request?.contents || body.contents || [];
       for (const c of srcContents) {
         const imageParts = (c.parts || []).flatMap(p => {
-          if (p.text !== undefined) return [{ text: p.text }];
-          if (p.inlineData?.data) return [{ inlineData: p.inlineData }];
-          return [];
+          if (p.inlineData?.data && /^image\//.test(p.inlineData.mimeType || "")) {
+            return [{ inlineData: { mimeType: p.inlineData.mimeType, data: p.inlineData.data } }];
+          }
+          return p.text !== undefined ? [{ text: p.text }] : [];
         });
         if (imageParts.length > 0) {
           contents.push({ role: c.role || "user", parts: imageParts });

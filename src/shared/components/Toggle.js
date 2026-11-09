@@ -10,6 +10,8 @@ export default function Toggle({
   disabled = false,
   size = "md",
   className,
+  ariaLabel,
+  title,
 }) {
   const sizes = {
     sm: { track: "w-8 h-4", thumb: "size-3", translate: "translate-x-4" },
@@ -32,6 +34,8 @@ export default function Toggle({
       <button
         type="button"
         role="switch"
+        aria-label={ariaLabel || label}
+        title={title}
         aria-checked={checked}
         disabled={disabled}
         onClick={handleClick}

@@ -4,6 +4,7 @@ import { getModelInfoCore } from "../../open-sse/services/model.js";
 import { handleImageGenerationCore } from "../../open-sse/handlers/imageGenerationCore.js";
 
 const models = ["gpt-6-sol"];
+const gptImage25Models = ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"];
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -93,5 +94,55 @@ describe("Codex GPT-6 image models", () => {
       cached_tokens: 111,
       reasoning_tokens: 22,
     });
+  });
+});
+
+describe("Codex GPT Image 2.5 variants", () => {
+  it.each(gptImage25Models)("exposes %s as an image model", (model) => {
+    const catalog = getModelsByProviderId("codex");
+    expect(catalog.find((entry) => entry.id === model)).toMatchObject({
+      kind: "image",
+      capabilities: ["text2img", "edit", "multiImage"],
+      params: ["size", "quality", "background", "image_detail", "output_format"],
+    });
+    expect(isValidModel("cx", model)).toBe(true);
+    expect(getModelType("cx", model)).toBe("image");
+  });
+
+  it.each(gptImage25Models)("routes %s through Codex image_generation tool", async (model) => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      "event: response.output_item.done",
+      'data: {"item":{"type":"image_generation_call","result":"ZmluYWw="}}',
+      "",
+      "event: response.completed",
+      'data: {"response":{"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}',
+      "",
+      "",
+    ].join("\n"), { status: 200, headers: { "Content-Type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const modelInfo = await getModelInfoCore(`cx/${model}`);
+    expect(modelInfo).toEqual({ provider: "codex", model });
+    const result = await handleImageGenerationCore({
+      modelInfo,
+      body: { prompt: "Draw a blue square", size: "1024x1024", output_format: "png" },
+      credentials: { accessToken: "test-token", providerSpecificData: { chatgptAccountId: "test-account" } },
+      log: null,
+    });
+
+    expect(result.success).toBe(true);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://chatgpt.com/backend-api/codex/responses");
+    const upstreamBody = JSON.parse(options.body);
+    expect(upstreamBody.model).toBe("gpt-6-sol");
+    expect(upstreamBody.tools).toEqual([{
+      type: "image_generation",
+      output_format: "png",
+      action: "generate",
+      model,
+      size: "1024x1024",
+    }]);
+    expect(upstreamBody.tool_choice).toEqual({ type: "image_generation" });
+    expect((await result.response.json()).data[0].b64_json).toBe("ZmluYWw=");
   });
 });

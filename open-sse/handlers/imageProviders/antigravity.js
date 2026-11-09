@@ -46,7 +46,7 @@ export default {
   buildHeaders: () => ({}),
   buildBody: () => ({}),
 
-  async executeViaExecutor(model, body, credentials, log) {
+  async executeViaExecutor(model, body, credentials, log, signal, submissionHooks = {}) {
     const executor = getExecutor("antigravity");
     if (!executor) throw new Error("Antigravity executor not found");
 
@@ -68,18 +68,16 @@ export default {
       }
     }
 
-    // Gemini image models have no negative prompt param — fold it into the prompt text
-    const prompt = body.negative_prompt
-      ? `${body.prompt}\n\nNegative prompt: ${body.negative_prompt}`
-      : body.prompt;
-
-    // Build parts: reference images first, then the text prompt
-    const parts = [];
-    for (const imageInput of collectImageInputs(body)) {
-      const inlineData = resolveImageInput(imageInput);
-      if (inlineData) parts.push(inlineData);
-    }
-    parts.push({ text: prompt });
+    // Preserve the caller's reference order: target first, then garment/style sources.
+    // Dropping a source silently turns an edit into a different visual request.
+    const imageInputs = Array.isArray(body.images) ? [...body.images] : [];
+    if (body.image) imageInputs.unshift(body.image);
+    const parts = imageInputs.map((input) => {
+      const part = resolveImageInput(input);
+      if (!part) throw new Error("Invalid Antigravity image reference; use a base64 image input.");
+      return part;
+    });
+    parts.push({ text: body.prompt });
 
     const chatBody = {
       contents: [{ role: "user", parts }],
@@ -91,30 +89,45 @@ export default {
       stream: false,
       credentials,
       log,
+      signal,
+      onBeforeDispatch: submissionHooks.onProviderDispatch,
+      onImageSubmissionStart: submissionHooks.onImageSubmissionStart,
+      // Image submissions are non-idempotent. Return the first upstream result
+      // to the image router so it can classify certainty and rotate accounts.
+      disableRetries: true,
     });
 
     if (!result.response.ok) {
       const text = await result.response.text();
-      const err = new Error(text || `HTTP ${result.response.status}`);
-      err.status = result.response.status;
-      try {
-        const json = JSON.parse(text);
-        const details = json.error?.details || [];
-        for (const d of details) {
-          const resetTimeStr = d.metadata?.quotaResetTimeStamp;
-          if (resetTimeStr) {
-            const ms = new Date(resetTimeStr).getTime();
-            if (ms > Date.now()) {
-              err.resetsAtMs = ms;
-              break;
-            }
-          }
-        }
-      } catch {}
-      throw err;
+      const parsed = executor.parseError?.(result.response, text) || {};
+      const error = new Error(parsed.message || text || `HTTP ${result.response.status}`);
+      error.status = Number(parsed.status) || result.response.status;
+      error.resetsAtMs = Number(parsed.resetsAtMs) || null;
+      error.headers = result.response.headers;
+      error.bodyText = text;
+      error.submissionTicket = result.submissionTicket;
+      error.providerRequestId = result.response.headers.get("x-request-id")
+        || result.response.headers.get("request-id")
+        || result.response.headers.get("x-goog-request-id");
+      throw error;
     }
 
-    return result.response.json();
+    const responseBody = await result.response.json();
+    const providerUsage = responseBody?.usageMetadata;
+    const usage = providerUsage && typeof providerUsage === "object" ? {
+      ...(Number.isSafeInteger(providerUsage.promptTokenCount) ? { prompt_tokens: providerUsage.promptTokenCount } : {}),
+      ...(Number.isSafeInteger(providerUsage.candidatesTokenCount) ? { completion_tokens: providerUsage.candidatesTokenCount } : {}),
+      ...(Number.isSafeInteger(providerUsage.totalTokenCount) ? { total_tokens: providerUsage.totalTokenCount } : {}),
+    } : null;
+    return {
+      imageSubmissionResult: true,
+      body: responseBody,
+      submissionTicket: result.submissionTicket,
+      providerRequestId: result.response.headers.get("x-request-id")
+        || result.response.headers.get("request-id")
+        || result.response.headers.get("x-goog-request-id"),
+      usage: usage && Object.keys(usage).length ? usage : null,
+    };
   },
 
   normalize: (responseBody, prompt) => {

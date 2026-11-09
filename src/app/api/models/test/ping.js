@@ -3,6 +3,7 @@ import { resolveProviderId } from "@/shared/constants/providers.js";
 import { unwrapClineEnvelope } from "open-sse/shared/clineEnvelope.js";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { IMAGE_QUOTA_CONFIG } from "open-sse/config/imageQuotaConfig.js";
 
 const CLI_TOKEN_SALT = "9r-cli-auth";
 
@@ -39,7 +40,7 @@ function createSilentWavFile() {
   return new Blob([buffer], { type: "audio/wav" });
 }
 
-async function getInternalHeaders() {
+export async function getInternalHeaders() {
   let apiKey = null;
   try {
     const keys = await getApiKeys();
@@ -85,9 +86,9 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
   if (kind === "image") {
     const res = await fetch(`${baseUrl}/api/v1/images/generations`, {
       method: "POST",
-      headers,
+      headers: { ...headers, "X-Hualogu-Image-Call-Type": "admin_model_sample" },
       body: JSON.stringify({ model, prompt: "test" }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(IMAGE_QUOTA_CONFIG.requestTimeoutMs + 10_000),
     });
     const latencyMs = Date.now() - start;
     const rawText = await res.text().catch(() => "");

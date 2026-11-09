@@ -27,7 +27,8 @@ import { updateProviderCredentials, checkAndRefreshToken } from "../services/tok
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 import { getKeyAccessContext, enforceKeyAccess, filterAdapterModels } from "../services/keyAccess.js";
-import { resolveSmartChoice } from "../services/systemoneRouter.js";
+import { getModelType, PROVIDER_ID_TO_ALIAS } from "open-sse/config/providerModels.js";
+import { requestsImageOutput, imageGenerationRequiresManagedRouteResponse } from "open-sse/utils/managedImageRoute.js";
 
 /**
  * Handle chat completion request
@@ -98,6 +99,13 @@ export async function handleChat(request, clientRawRequest = null) {
   const keyAccess = await getKeyAccessContext(request);
   const keyAccessDenied = await enforceKeyAccess(keyAccess, modelStr);
   if (keyAccessDenied) return keyAccessDenied;
+
+  // Native hosted image tools bypass the managed Images handler's admission,
+  // supplier rotation, and usage trace. Keep them closed until they share that
+  // accounting path; ordinary function tools named "image_generation" remain valid.
+  if (requestsImageOutput(body)) {
+    return imageGenerationRequiresManagedRouteResponse();
+  }
 
   // Bypass naming/warmup requests before combo rotation to avoid wasting rotation slots
   const userAgent = request?.headers?.get("user-agent") || "";
@@ -265,6 +273,14 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
   const { provider, model } = modelInfo;
 
+  // Keep registry image-output models on the Images handler's quota admission,
+  // account rotation, submission accounting, and unknown-outcome protection.
+  // Vision-capable chat models keep working.
+  const providerAlias = PROVIDER_ID_TO_ALIAS[provider] || provider;
+  if (["image", "imageGen"].includes(getModelType(providerAlias, model))) {
+    return imageGenerationRequiresManagedRouteResponse();
+  }
+
   // Routing shown in the unified "▶" line (client model → provider/model)
 
   // Extract userAgent from request
@@ -277,7 +293,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   let lastHeaders = null;
 
   while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { requestedModel: requestedModel || model });
+    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { requestedModel: requestedModel || model, capability: "chat" });
 
     // All accounts unavailable
     if (!credentials || credentials.allRateLimited) {

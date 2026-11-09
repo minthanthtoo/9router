@@ -61,6 +61,9 @@ Thanks.md
 PUBLIC.en.md
 PR/*
 package-lock.json
+!/package-lock.json
+!tests/package-lock.json
+!docker/lazy-runtime/package-lock.json
 
 
 #Ignore vscode AI rules
@@ -102,3 +105,14 @@ graphify-out/*
 start-dev-silent.cjs
 debug.log
 .scratch/
+
+# Local review artifacts and dependencies
+node_modules/
+.superpowers/
+.next-ui/
+
+# Patch provenance and implementation plans
+!docs/renovation/
+!docs/renovation/**
+!docs/superpowers/
+!docs/superpowers/**

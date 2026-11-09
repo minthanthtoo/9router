@@ -43,6 +43,71 @@ describe("BaseExecutor.execute — retry by status (config-driven)", () => {
     expect(out.response.status).toBe(502);
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
+
+  it("returns the first provider response when retries are disabled for a non-idempotent call", async () => {
+    const ex = makeExec({
+      baseUrls: ["https://a/api", "https://b/api"],
+      retry: { 503: { attempts: 3, delayMs: 0 } },
+    });
+    fetchMock.mockResolvedValue(res(503));
+
+    const out = await ex.execute({ model: "m", body: {}, stream: false, credentials: creds, disableRetries: true });
+
+    expect(out.response.status).toBe(503);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not dispatch when the shared image budget blocks the executor call", async () => {
+    const ex = makeExec({ baseUrls: ["https://a/api", "https://b/api"] });
+    const onBeforeDispatch = vi.fn(() => "deadline");
+
+    await expect(ex.execute({
+      model: "m",
+      body: {},
+      stream: false,
+      credentials: creds,
+      disableRetries: true,
+      onBeforeDispatch,
+    })).rejects.toMatchObject({ imageDispatchBlocked: "deadline" });
+
+    expect(onBeforeDispatch).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("persists the physical image submission after budget admission and attaches it to an ambiguous fetch error", async () => {
+    const ex = makeExec({ baseUrl: "https://x/api" });
+    const ticket = { routerRequestId: "router-id", submissionNumber: 1 };
+    const order = [];
+    fetchMock.mockImplementationOnce(async () => {
+      order.push("fetch");
+      throw new Error("connection closed after upload");
+    });
+
+    await expect(ex.execute({
+      model: "m",
+      body: {},
+      stream: false,
+      credentials: creds,
+      disableRetries: true,
+      onBeforeDispatch: async () => { order.push("admit"); },
+      onImageSubmissionStart: async () => { order.push("persist"); return ticket; },
+    })).rejects.toMatchObject({ submissionTicket: ticket });
+
+    expect(order).toEqual(["admit", "persist", "fetch"]);
+  });
+
+  it("does not dispatch when durable image submission tracking is unavailable", async () => {
+    const ex = makeExec({ baseUrl: "https://x/api" });
+    await expect(ex.execute({
+      model: "m",
+      body: {},
+      stream: false,
+      credentials: creds,
+      disableRetries: true,
+      onImageSubmissionStart: async () => "accounting_unavailable",
+    })).rejects.toMatchObject({ imageDispatchBlocked: "accounting_unavailable" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("BaseExecutor.execute — baseUrls fallback", () => {
@@ -80,6 +145,18 @@ describe("BaseExecutor.execute — network error retry/fallback", () => {
       thrown = e;
     }
     expect(thrown?.message).toBe("boom");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not replay a possibly accepted call after a network exception when retries are disabled", async () => {
+    const ex = makeExec({
+      baseUrls: ["https://a/api", "https://b/api"],
+      retry: { 502: { attempts: 3, delayMs: 0 } },
+    });
+    fetchMock.mockImplementationOnce(async () => { throw new Error("connection closed after upload"); });
+
+    await expect(ex.execute({ model: "m", body: {}, stream: false, credentials: creds, disableRetries: true }))
+      .rejects.toThrow("connection closed after upload");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

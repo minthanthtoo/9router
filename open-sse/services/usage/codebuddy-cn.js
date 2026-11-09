@@ -21,7 +21,7 @@
 
 import { proxyAwareFetch } from "../../utils/proxyFetch.js";
 import { PROVIDERS } from "../../providers/index.js";
-import { U, parseResetTime } from "./shared.js";
+import { U, parseResetTime, toFiniteNumber } from "./shared.js";
 
 const PROVIDER_ID = "codebuddy-cn";
 
@@ -106,6 +106,7 @@ async function getCodeBuddyUsage(providerId, accessToken, apiKey, providerSpecif
       const name = seenRefill[base] > 1 ? `${base} ${seenRefill[base]}` : base;
       quotas[name] = {
         used: num(acc.CycleCapacityUsedPrecise, acc.CycleCapacityUsed),
+        quotaStatus: toFiniteNumber(acc.CycleCapacityUsedPrecise ?? acc.CycleCapacityUsed, null) === null ? "unknown" : "reported",
         total: num(acc.CycleCapacitySizePrecise, acc.CycleCapacitySize),
         resetAt: parseResetTime(acc.CycleEndTime),
         unlimited: false,

@@ -1,6 +1,8 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { normalizeGeminiProjectId } from "../../geminiProjectId.js";
+import { sanitizeImageUsageEvidence } from "../../../../open-sse/services/usage/imageEvidence.js";
 
 const OPTIONAL_FIELDS = [
   "displayName", "email", "globalPriority", "defaultModel",
@@ -10,7 +12,88 @@ const OPTIONAL_FIELDS = [
   "consecutiveUseCount", "idToken", "lastRefreshAt",
 ];
 
+export async function recordImageProviderUsageEvidence(connection, evidence) {
+  evidence = sanitizeImageUsageEvidence(evidence, connection.provider);
+  if (!evidence) return;
+  const db = await getAdapter();
+  db.transaction(() => {
+    const row = db.get("SELECT * FROM providerConnections WHERE id = ?", [connection.id]);
+    if (!row) return;
+    const latest = rowToConn(row);
+    if (latest.provider !== connection.provider || quotaIdentityDescriptor(latest) !== quotaIdentityDescriptor(connection)
+      || Number(latest.providerSpecificData?.imageQuotaIdentityGeneration || 1) !== Number(connection.providerSpecificData?.imageQuotaIdentityGeneration || 1)) return;
+    const previous = latest.providerSpecificData?.imageQuotaUsageEvidence;
+    if (previous?.observedAt && Date.parse(previous.observedAt) > Date.parse(evidence.observedAt)) return;
+    latest.providerSpecificData = { ...latest.providerSpecificData, imageQuotaUsageEvidence: evidence };
+    db.run("UPDATE providerConnections SET data = ? WHERE id = ?", [connToRow(latest).data, latest.id]);
+  });
+}
+
 const MODEL_LOCK_PREFIX = "modelLock_";
+const QUOTA_IDENTITY_FIELDS = [
+  "verifiedQuotaIdentity",
+  "chatgptAccountId",
+  "workspaceId",
+  "chatgptWorkspaceId",
+  "googleAccountId",
+  "googleAccountSub",
+  "googleCloudProjectId",
+  "imageQuotaIdentityGeneration",
+];
+
+function quotaIdentityDescriptor(connection) {
+  const data = connection?.providerSpecificData || {};
+  if (connection?.provider === "gemini") {
+    const project = normalizeGeminiProjectId(connection.projectId || data.googleCloudProjectId || data.projectId);
+    return project ? `gemini_api_project:${project}` : connection?.id ? `connection:${String(connection.id)}` : null;
+  }
+  const verified = data.verifiedQuotaIdentity;
+  if (verified?.verified === true && verified.namespace && verified.value) {
+    return `verified:${String(verified.namespace)}:${String(verified.value)}`;
+  }
+  if (connection.provider === "codex" && data.chatgptAccountId) {
+    const workspace = String(data.workspaceId || data.chatgptWorkspaceId || "");
+    return `codex:${String(data.chatgptAccountId)}${workspace ? `:${workspace}` : ""}`;
+  }
+  if (connection.provider === "antigravity" && (data.googleAccountId || data.googleAccountSub)) {
+    const project = String(connection.projectId || data.googleCloudProjectId || "");
+    return `antigravity:${String(data.googleAccountId || data.googleAccountSub)}${project ? `:${project}` : ""}`;
+  }
+  return connection?.id ? `connection:${String(connection.id)}` : null;
+}
+
+export function prepareQuotaIdentityPatch(existing, patch) {
+  const existingData = existing?.providerSpecificData || {};
+  const incomingData = patch?.providerSpecificData;
+  const nextData = incomingData && typeof incomingData === "object" && !Array.isArray(incomingData)
+    ? { ...incomingData }
+    : { ...existingData };
+
+  // Token refresh responses often omit account/workspace metadata. Keep only
+  // the stable identity fields needed to preserve scoped quota state.
+  const identityFields = existing?.provider === "gemini" || patch?.provider === "gemini"
+    ? [...QUOTA_IDENTITY_FIELDS, "projectId"]
+    : QUOTA_IDENTITY_FIELDS;
+  for (const field of identityFields) {
+    if (nextData[field] === undefined || nextData[field] === null || nextData[field] === "") {
+      if (existingData[field] !== undefined) nextData[field] = existingData[field];
+      else if (nextData[field] === null || nextData[field] === "") delete nextData[field];
+    }
+  }
+
+  const before = quotaIdentityDescriptor(existing);
+  const afterConnection = {
+    ...existing,
+    ...patch,
+    providerSpecificData: nextData,
+  };
+  const after = quotaIdentityDescriptor(afterConnection);
+  const currentGeneration = Number(existingData.imageQuotaIdentityGeneration) || 1;
+  const identityChanged = before !== null && before !== after;
+  if (identityChanged) delete nextData.imageQuotaUsageEvidence;
+  nextData.imageQuotaIdentityGeneration = identityChanged ? currentGeneration + 1 : currentGeneration;
+  return { ...patch, providerSpecificData: nextData };
+}
 
 function resetHealthStateOnActivation(existing, patch) {
   if (patch?.testStatus !== "active") return patch;
@@ -89,6 +172,38 @@ function deriveConnectionName(data, fallbackName) {
   return fallbackName;
 }
 
+// Shared provider-specific identity matcher. Account creation and selective
+// transfer must use the same rules so imports cannot collapse identities that
+// a normal login would keep separate (notably Codex workspaces and cross-IdP accounts).
+export function findMatchingProviderConnection(existingConnections, data) {
+  const all = Array.isArray(existingConnections) ? existingConnections : [];
+  if (data.authType === "oauth" && data.email) {
+    const incomingUsername = data.providerSpecificData?.username;
+    const incomingWs = data.providerSpecificData?.chatgptAccountId;
+    return all.find((connection) => {
+      if (connection.provider !== data.provider || connection.authType !== "oauth" || connection.email !== data.email) return false;
+
+      if (data.provider === "codex") {
+        const existingWs = connection.providerSpecificData?.chatgptAccountId;
+        return Boolean(incomingWs && existingWs && incomingWs === existingWs);
+      }
+
+      const existingWs = connection.providerSpecificData?.chatgptAccountId;
+      if (incomingWs || existingWs) return Boolean(incomingWs && existingWs && incomingWs === existingWs);
+
+      const existingUsername = connection.providerSpecificData?.username;
+      if (incomingUsername || existingUsername) {
+        return Boolean(incomingUsername && existingUsername && incomingUsername === existingUsername);
+      }
+      return true;
+    }) || null;
+  }
+  if (data.authType === "apikey" && data.name) {
+    return all.find((connection) => connection.provider === data.provider && connection.authType === "apikey" && connection.name === data.name) || null;
+  }
+  return null;
+}
+
 export async function getProviderConnections(filter = {}) {
   const db = await getAdapter();
   const where = [];
@@ -154,43 +269,7 @@ export async function createProviderConnection(data) {
       ? db.get(`SELECT COUNT(*) AS n FROM providerConnections WHERE provider = ?`, [data.provider])?.n ?? all.length
       : all.length;
 
-    let existing = null;
-    if (data.authType === "oauth" && data.email) {
-      const incomingUsername = data.providerSpecificData?.username;
-      const incomingWs = data.providerSpecificData?.chatgptAccountId;
-      existing = all.find(c => {
-        if (c.authType !== "oauth" || c.email !== data.email) return false;
-
-        // Codex/OpenAI can issue multiple OAuth grants for the same email.
-        // Refresh tokens are rotated single-use; collapsing a new login onto an
-        // existing bare-email row overwrites the first account's token pair and
-        // makes it look "invalid" after adding a second account. Only update an
-        // existing Codex row when both rows expose the same ChatGPT account ID.
-        if (data.provider === "codex") {
-          const existingWs = c.providerSpecificData?.chatgptAccountId;
-          return !!incomingWs && !!existingWs && incomingWs === existingWs;
-        }
-
-        // Workspace providers use workspace ID when both sides have it
-        const existingWs = c.providerSpecificData?.chatgptAccountId;
-        if (incomingWs && existingWs) return incomingWs === existingWs;
-        if (incomingWs && !existingWs) return false;
-        if (!incomingWs && existingWs) return false;
-        // Non-workspace providers: match on (email + username) so cross-IdP
-        // accounts don't overwrite each other. Require username on both sides
-        // — if only one side has it, treat as a distinct identity rather than
-        // collapsing onto the bare-email fallback (which would re-introduce
-        // the cross-IdP overwrite).
-        const existingUsername = c.providerSpecificData?.username;
-        if (incomingUsername && existingUsername) {
-          return incomingUsername === existingUsername;
-        }
-        if (incomingUsername || existingUsername) return false;
-        return true;
-      });
-    } else if (data.authType === "apikey" && data.name) {
-      existing = all.find(c => c.authType === "apikey" && c.name === data.name);
-    }
+    const existing = findMatchingProviderConnection(all, data);
     // access_token: never dedup — user manages duplicates manually
 
     if (existing) {
@@ -209,7 +288,7 @@ export async function createProviderConnection(data) {
         err.existingName = existing.name;
         throw err;
       }
-      const normalized = resetHealthStateOnActivation(existing, data);
+      const normalized = resetHealthStateOnActivation(existing, prepareQuotaIdentityPatch(existing, data));
       const merged = { ...existing, ...normalized, updatedAt: now };
       upsert(db, merged);
       result = merged;
@@ -267,7 +346,7 @@ export async function updateProviderConnection(id, data) {
     const row = db.get(`SELECT * FROM providerConnections WHERE id = ?`, [id]);
     if (!row) { result = null; return; }
     const existing = rowToConn(row);
-    const normalized = resetHealthStateOnActivation(existing, data);
+    const normalized = resetHealthStateOnActivation(existing, prepareQuotaIdentityPatch(existing, data));
     const merged = { ...existing, ...normalized, updatedAt: new Date().toISOString() };
     upsert(db, merged);
     if (data.priority !== undefined) reorderInTx(db, existing.provider);

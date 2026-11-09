@@ -8,6 +8,7 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    setupFiles: [resolve(__dirname, "setup-isolated-data.js")],
     include: ["**/*.test.js"],
     // Don't scan into git worktrees nested under .claude/ — they carry their
     // own copies of the test files but lack an installed node_modules (open-sse,
@@ -21,6 +22,8 @@ export default defineConfig({
   resolve: {
     // Use array form so subpath aliases (e.g. "@/lib/db/index.js") resolve correctly.
     alias: [
+      // jsdom has its own undici; transport mocks must target the app copy.
+      { find: /^undici$/, replacement: resolve(__dirname, "../node_modules/undici/index.js") },
       { find: /^open-sse\//, replacement: resolve(__dirname, "../open-sse") + "/" },
       { find: "open-sse", replacement: resolve(__dirname, "../open-sse") },
       { find: /^@\//, replacement: resolve(__dirname, "../src") + "/" },

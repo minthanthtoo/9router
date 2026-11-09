@@ -1,0 +1,3 @@
+@keyframes reveal { from { opacity: .4; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.enter { animation: reveal 160ms ease-out both; scrollbar-gutter: stable; }
+@media (prefers-reduced-motion: reduce) { .enter { animation: none; } }

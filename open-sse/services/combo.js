@@ -220,6 +220,43 @@ function rotateModelsFromIndex(models, currentIndex) {
   return rotatedModels;
 }
 
+function combinedImageQuotaFailure(failures, model) {
+  const hasQuotaBlock = failures.some((failure) => failure.code === "image_pool_exhausted");
+  const code = hasQuotaBlock ? "image_pool_exhausted" : "image_pool_paused";
+  const retryTimes = failures
+    .map((failure) => Date.parse(failure.retryAt || ""))
+    .filter((time) => Number.isFinite(time) && time > Date.now());
+  const retryAt = retryTimes.length ? new Date(Math.min(...retryTimes)).toISOString() : null;
+  const hasUnknown = failures.some((failure) => failure.confidence === "unknown" || !failure.retryAt);
+  const confidence = hasUnknown
+    ? "unknown"
+    : failures.some((failure) => failure.confidence === "estimated")
+      ? "estimated"
+      : "provider_confirmed";
+  const observedAt = failures.map((failure) => failure.observedAt).filter(Boolean).sort().at(-1) || null;
+  const requestId = failures.find((failure) => failure.requestId)?.requestId || null;
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+  });
+  if (requestId) headers.set("X-Request-ID", requestId);
+  if (retryAt) headers.set("Retry-After", String(Math.max(1, Math.ceil((Date.parse(retryAt) - Date.now()) / 1000))));
+
+  return new Response(JSON.stringify({ error: {
+    code,
+    message: hasQuotaBlock
+      ? "No configured image account can currently serve this request."
+      : "Image generation is paused by an operator for the configured account pool.",
+    request_id: requestId,
+    model: model || null,
+    availability_state: hasQuotaBlock ? "quota_blocked" : "manual_paused",
+    retry_at: hasQuotaBlock ? retryAt : null,
+    availability_confidence: hasQuotaBlock ? confidence : "unknown",
+    observed_at: observedAt,
+    retry_scope: hasQuotaBlock ? "new_request_after_check" : "none",
+  } }), { status: hasQuotaBlock ? 429 : 503, headers });
+}
+
 /**
  * Get rotated model list based on strategy
  * @param {string[]} models - Array of model strings
@@ -360,6 +397,7 @@ export async function handleComboChat({
   comboStrategy,
   comboStickyLimit = 1,
   autoSwitch = true,
+  preserveImageQuotaErrors = false,
   sessionId = null,
   smartPolicy = "smart",
   sessionSticky = true,
@@ -373,7 +411,6 @@ export async function handleComboChat({
     const policy = (typeof smartPolicy === "string" ? smartPolicy : "smart").toLowerCase();
     const isPerTurn = policy === "per-turn" || sessionSticky === false;
     const isStrict = policy === "strict";
-
     let switchThreshold = 0.8;
     if (policy === "custom") {
       const custom = Number(confidenceThreshold);
@@ -385,69 +422,51 @@ export async function handleComboChat({
       if (Number.isFinite(custom) && custom > 0) switchThreshold = custom;
     }
 
-    if (!isPerTurn && sessionId) {
-      activeStickyModel = getStickyComboModel(comboName, sessionId, models);
-    }
-
+    if (!isPerTurn && sessionId) activeStickyModel = getStickyComboModel(comboName, sessionId, models);
     if (activeStickyModel) {
       if (isStrict) {
-        // Strict Lock: re-use sticky model without invoking System One (0ms, 0 extra tokens)
-        rotatedModels = [activeStickyModel, ...models.filter((m) => m !== activeStickyModel)];
-        log.info("COMBO", `smart-router [strict] locked session "${sessionId}" → ${activeStickyModel}`);
+        rotatedModels = [activeStickyModel, ...models.filter((model) => model !== activeStickyModel)];
       } else if (typeof resolveSmartChoice === "function") {
-        // Smart Switch (Adaptive): check if the user's task drastically shifted
         try {
-          const smartResult = await resolveSmartChoice(body, models);
-          const newChoice = smartResult?.choice;
-          const conf = typeof smartResult?.confidence === "number" ? smartResult.confidence : null;
-
-          if (newChoice && newChoice !== activeStickyModel && models.includes(newChoice) && conf !== null && conf >= switchThreshold) {
-            // Task changed with high confidence: switch model and update session
-            rotatedModels = orderModelsByChoice(models, smartResult);
-            log.info("COMBO", `smart-router [smart-switch] task changed → switched from ${activeStickyModel} to ${newChoice} (confidence: ${conf} >= ${switchThreshold})`);
+          const choice = await resolveSmartChoice(body, models);
+          const confidence = typeof choice?.confidence === "number" ? choice.confidence : null;
+          if (choice?.choice && choice.choice !== activeStickyModel && models.includes(choice.choice)
+            && confidence !== null && confidence >= switchThreshold) {
+            rotatedModels = orderModelsByChoice(models, choice);
             if (sessionId) {
-              setStickyComboModel(comboName, sessionId, newChoice);
-              activeStickyModel = newChoice;
+              setStickyComboModel(comboName, sessionId, choice.choice);
+              activeStickyModel = choice.choice;
             }
           } else {
-            // Stay on current model to preserve warm prompt cache
-            rotatedModels = [activeStickyModel, ...models.filter((m) => m !== activeStickyModel)];
-            log.info("COMBO", `smart-router [smart-switch] retained prompt cache model "${activeStickyModel}"`);
+            rotatedModels = [activeStickyModel, ...models.filter((model) => model !== activeStickyModel)];
           }
-        } catch (err) {
-          // Fail open to active sticky model
-          rotatedModels = [activeStickyModel, ...models.filter((m) => m !== activeStickyModel)];
-          log.warn("COMBO", `smart-router error, retained model "${activeStickyModel}"`, { error: err?.message || String(err) });
+        } catch (error) {
+          rotatedModels = [activeStickyModel, ...models.filter((model) => model !== activeStickyModel)];
+          log.warn("COMBO", `smart-router error, retained model "${activeStickyModel}"`, { error: error?.message || String(error) });
         }
       } else {
-        rotatedModels = [activeStickyModel, ...models.filter((m) => m !== activeStickyModel)];
+        rotatedModels = [activeStickyModel, ...models.filter((model) => model !== activeStickyModel)];
       }
     } else if (typeof resolveSmartChoice === "function") {
-      // Turn 1 or per-turn: evaluate System One to select initial model
       try {
-        const smartResult = await resolveSmartChoice(body, models);
-        const conf = typeof smartResult?.confidence === "number" ? smartResult.confidence : null;
-
-        if (smartResult?.choice && models.includes(smartResult.choice)) {
-          if (switchThreshold > 0 && conf !== null && conf < switchThreshold) {
-            log.info("COMBO", `smart-router confidence (${conf}) below threshold (${switchThreshold}), fallback to order: [${models.join(", ")}]`);
+        const choice = await resolveSmartChoice(body, models);
+        const confidence = typeof choice?.confidence === "number" ? choice.confidence : null;
+        if (choice?.choice && models.includes(choice.choice)) {
+          if (switchThreshold > 0 && confidence !== null && confidence < switchThreshold) {
+            log.info("COMBO", `smart-router confidence (${confidence}) below threshold (${switchThreshold}), using configured order`);
           } else {
-            rotatedModels = orderModelsByChoice(models, smartResult);
-            log.info("COMBO", `smart-router selected ${smartResult.choice} (confidence: ${conf ?? "N/A"})`);
+            rotatedModels = orderModelsByChoice(models, choice);
             if (!isPerTurn && sessionId) {
-              setStickyComboModel(comboName, sessionId, smartResult.choice);
-              activeStickyModel = smartResult.choice;
+              setStickyComboModel(comboName, sessionId, choice.choice);
+              activeStickyModel = choice.choice;
             }
           }
-        } else {
-          log.info("COMBO", `smart-router no decision, fallback to order: [${models.join(", ")}]`);
         }
-      } catch (err) {
-        log.warn("COMBO", `smart-router error, fallback to order: [${models.join(", ")}]`, { error: err?.message || String(err) });
+      } catch (error) {
+        log.warn("COMBO", "smart-router error, using configured order", { error: error?.message || String(error) });
       }
     }
   } else {
-    // Apply rotation strategy if enabled
     rotatedModels = getRotatedModels(models, comboName, comboStrategy, comboStickyLimit);
   }
 
@@ -467,6 +486,8 @@ export async function handleComboChat({
   let earliestRetryAfter = null;
   let lastStatus = null;
   let requestScopedResult = null;
+  const imageQuotaFailures = [];
+  let onlyImageQuotaFailures = preserveImageQuotaErrors;
 
   for (let i = 0; i < rotatedModels.length; i++) {
     const modelStr = rotatedModels[i];
@@ -557,11 +578,39 @@ export async function handleComboChat({
       // Extract error info from response
       let errorText = result.statusText || "";
       let retryAfter = null;
+      let errorBody = null;
       try {
-        const errorBody = await result.clone().json();
-        errorText = errorBody?.error?.message || errorBody?.error || errorBody?.message || errorText;
-        retryAfter = errorBody?.retryAfter || null;
+        errorBody = await result.clone().json();
+        const structuredError = errorBody?.error && typeof errorBody.error === "object" ? errorBody.error : null;
+        errorText = structuredError?.message || errorBody?.message || errorBody?.error || errorText;
+        retryAfter = errorBody?.retryAfter || structuredError?.retry_at || null;
+        if (preserveImageQuotaErrors) {
+          if (["image_pool_exhausted", "image_pool_paused"].includes(structuredError?.code)) {
+            imageQuotaFailures.push({
+              code: structuredError.code,
+              retryAt: structuredError.retry_at || null,
+              confidence: structuredError.availability_confidence || "unknown",
+              observedAt: structuredError.observed_at || null,
+              requestId: structuredError.request_id || result.headers.get("x-request-id") || null,
+            });
+          } else {
+            onlyImageQuotaFailures = false;
+          }
+        }
+        if (preserveImageQuotaErrors && structuredError?.code === "image_outcome_unknown") {
+          // The upstream may already have accepted this image request. Do not
+          // let combo fallback submit it to another model/account.
+          return result;
+        }
+        if (preserveImageQuotaErrors
+          && ["image_deadline_exceeded", "image_attempt_limit_reached", "image_supplier_budget_exhausted",
+            "image_supplier_budget_unavailable"].includes(structuredError?.code)) {
+          // These request-wide guards are terminal even if another combo model
+          // is available; the shared deadline/dispatch ceiling has been spent.
+          return result;
+        }
       } catch {
+        if (preserveImageQuotaErrors) onlyImageQuotaFailures = false;
         // Ignore JSON parse errors
       }
 
@@ -614,31 +663,27 @@ export async function handleComboChat({
       log.warn("COMBO", `Model ${modelStr} failed, trying next`, { status: result.status });
     } catch (error) {
       // Catch unexpected exceptions to ensure fallback continues
-      if (comboStrategy === "smart" && sessionId && modelStr === activeStickyModel) {
-        clearStickyComboSession(comboName, sessionId);
-      }
+      if (preserveImageQuotaErrors) onlyImageQuotaFailures = false;
       lastError = error.message || String(error);
       if (!lastStatus) lastStatus = 500;
       log.warn("COMBO", `Model ${modelStr} threw error, trying next`, { error: lastError });
     }
   }
 
-  // At least one member rejected the request itself. Hand back that member's own
-  // response — status and body — rather than the synthesized envelope below: the
-  // synthesized one reaches the client as a 200 carrying an error object, which
-  // reads as an empty success, and it buries the member that named the real cause.
-  // This is also what the caller saw before combos advanced on these errors.
-  if (requestScopedResult) {
-    log.warn("COMBO", `No model served the request; returning the first request-scoped failure (${requestScopedResult.status})`);
-    return requestScopedResult;
+  if (preserveImageQuotaErrors && onlyImageQuotaFailures && imageQuotaFailures.length > 0 && imageQuotaFailures.length === rotatedModels.length) {
+    return combinedImageQuotaFailure(imageQuotaFailures, comboName || body?.model);
   }
+
+  if (requestScopedResult) return requestScopedResult;
 
   // All models failed
   // Use 503 (Service Unavailable) rather than 406 (Not Acceptable) — 406 implies
   // the request itself is invalid, but here the providers are simply unavailable
   // or have no active credentials. 503 is more accurate and retryable by clients.
   const allDisabled = lastError && lastError.toLowerCase().includes("no credentials");
-  const status = allDisabled ? 503 : (lastStatus || 503);
+  const mixedImageQuotaFailure = preserveImageQuotaErrors && imageQuotaFailures.length > 0 && !onlyImageQuotaFailures;
+  if (mixedImageQuotaFailure) earliestRetryAfter = null;
+  const status = allDisabled || mixedImageQuotaFailure ? 503 : (lastStatus || 503);
   const msg = lastError || "All combo models unavailable";
 
   if (earliestRetryAfter) {

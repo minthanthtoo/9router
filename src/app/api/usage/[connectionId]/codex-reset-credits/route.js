@@ -1,6 +1,7 @@
 // Ensure proxyFetch is loaded to patch globalThis.fetch
 import "open-sse/index.js";
 
+import { recordRotationCredits, invalidateRotationSnapshot } from "@/lib/db/repos/providerRotationRepo.js";
 import { getProviderConnectionById } from "@/lib/localDb";
 import { consumeCodexRateLimitResetCredit, getCodexRateLimitResetCredits } from "open-sse/services/usage.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
@@ -100,6 +101,7 @@ export async function GET(_request, { params }) {
       connection = refreshed.connection;
     }
 
+    const rotationReadStartedAt = Date.now();
     let result;
     try {
       result = await getCodexRateLimitResetCredits(connection.accessToken, proxyOptions, connection.providerSpecificData);
@@ -110,6 +112,7 @@ export async function GET(_request, { params }) {
       result = await getCodexRateLimitResetCredits(connection.accessToken, proxyOptions, connection.providerSpecificData);
     }
 
+    await recordRotationCredits(connection, result, rotationReadStartedAt);
     return Response.json(result);
   } catch (error) {
     const provider = connection?.provider ?? "unknown";
@@ -119,7 +122,7 @@ export async function GET(_request, { params }) {
 }
 
 export async function POST(request, { params }) {
-  let connection;
+  let connection, resetStarted = false;
   try {
     const { connectionId } = await params;
     const resolved = await getCodexConnection(connectionId);
@@ -135,6 +138,8 @@ export async function POST(request, { params }) {
 
     // Server-generated redeem id prevents client-controlled replay
     const redeemRequestId = crypto.randomUUID();
+    await invalidateRotationSnapshot(connection.id, true);
+    resetStarted = true;
     let consumeResult = await consumeCodexRateLimitResetCredit(connection.accessToken, redeemRequestId, proxyOptions);
 
     if (isOAuth && isAuthExpiredResult(consumeResult) && connection.refreshToken) {
@@ -152,5 +157,7 @@ export async function POST(request, { params }) {
     const provider = connection?.provider ?? "unknown";
     console.warn(`[Codex Reset Credits] ${provider}: ${error.message}`);
     return Response.json({ error: error.message }, { status: 500 });
+  } finally {
+    if (resetStarted) { try { await invalidateRotationSnapshot(connection.id); } catch { console.warn("[Codex reset] Rotation snapshot remains unavailable"); } }
   }
 }

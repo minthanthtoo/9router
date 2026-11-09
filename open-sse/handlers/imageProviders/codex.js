@@ -1,15 +1,12 @@
-// Codex OAuth image generation: native Images API for GPT Image, Responses SSE for edits.
+// Codex (paid ChatGPT plans: Go/Plus/Pro/...) image generation via Responses API + SSE
 import { randomUUID } from "node:crypto";
-import { nowSec } from "./_base.js";
+import { hasUsableImagePayload, isUsableBase64Image, nowSec } from "./_base.js";
 import { PROVIDERS } from "../../config/providers.js";
 import { PROVIDER_MEDIA } from "../../providers/index.js";
 import { CODEX_CLI_VERSION } from "../../config/appConstants.js";
+import { classifyImageQuotaError, isCodexImageUsageFailure } from "./quotaErrors.js";
 
 const CODEX_RESPONSES_URL = PROVIDERS["codex"].baseUrl;
-// Codex OAuth image generation uses the native Images endpoint. The Responses
-// image_generation path has returned unsupported `complexity=medium` errors for
-// GPT Image models. Native has ignored explicit n/size/format controls,
-// so preserve Responses for those requests, edits, and older virtual models.
 const CODEX_IMAGES_GENERATIONS_URL = PROVIDER_MEDIA.codex.imageConfig.baseUrl;
 const CODEX_USER_AGENT = `codex_cli_rs/${CODEX_CLI_VERSION}`;
 const CODEX_ORIGINATOR = "codex_cli_rs";
@@ -153,6 +150,7 @@ function nativeImageSseResponse(result) {
 // Parse Codex SSE stream → final base64 image. Optional callbacks for client streaming.
 async function parseStream(response, log, callbacks = {}) {
   const reader = response.body.getReader();
+  callbacks.onReader?.(reader);
   const decoder = new TextDecoder();
   let buffer = "";
   let imageB64 = null;
@@ -162,6 +160,7 @@ async function parseStream(response, log, callbacks = {}) {
   let bytesReceived = 0;
   let lastProgressLogMs = 0;
   let usage = null;
+  let failure = null;
 
   try {
     while (true) {
@@ -202,6 +201,11 @@ async function parseStream(response, log, callbacks = {}) {
           for (const key of ["code", "type", "param"]) {
             if (typeof error?.[key] === "string") err[key] = error[key];
           }
+          if (isCodexImageUsageFailure(error)) {
+            failure = error;
+            await reader.cancel();
+            return { imageB64, usage, failure };
+          }
           throw err;
         }
 
@@ -225,6 +229,7 @@ async function parseStream(response, log, callbacks = {}) {
             const data = JSON.parse(dataStr);
             const item = data?.item;
             if (item?.type === "image_generation_call") {
+              if (item.status === "failed" && isCodexImageUsageFailure(item.failure)) failure = item.failure;
               if (item.result) imageB64 = item.result;
               else upstreamError = extractStreamError(item) || upstreamError;
             } else if (item?.type === "message") {
@@ -256,39 +261,222 @@ async function parseStream(response, log, callbacks = {}) {
   if (!imageB64 && !upstreamError && assistantText) {
     upstreamError = `Codex returned text instead of an image: "${assistantText.trim().slice(0, 300)}"`;
   }
-  return { imageB64, usage, error: upstreamError };
+  return { imageB64, usage, failure, error: upstreamError };
+}
+
+async function forwardQuotaFallbackResponse(response, controller, send, setActiveReader, signal) {
+  const contentType = response?.headers?.get("content-type") || "";
+  if (contentType.includes("text/event-stream") && response.body) {
+    const reader = response.body.getReader();
+    setActiveReader(reader);
+    try {
+      while (!signal.aborted) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value?.byteLength) controller.enqueue(value);
+      }
+    } finally {
+      try { reader.releaseLock(); } catch {}
+    }
+    return;
+  }
+
+  let payload = null;
+  try { payload = await response.json(); } catch {}
+  const error = payload?.error && typeof payload.error === "object"
+    ? payload.error
+    : { message: `Image fallback failed with status ${response?.status || 502}.` };
+  send("error", { ...error, http_status: response?.status || 502 });
+}
+
+async function waitForStreamSignal(promise, signal) {
+  if (!signal) return promise;
+  let onAbort;
+  const aborted = new Promise((resolve) => {
+    onAbort = resolve;
+    if (signal.aborted) resolve();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try { await Promise.race([promise, aborted]); } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
 }
 
 // SSE Response that pipes codex progress + partial + done events to client
-function buildSseResponse(providerResponse, log, onSuccess, onUsage) {
+function buildSseResponse(providerResponse, log, onSuccess, onUsage, onQuotaObservation, onImageSubmissionResult, submissionTicket, providerRequestId, model, clientSignal) {
+  const abortController = new AbortController();
+  let activeReader = null;
+  let deadlineExpired = false;
+  const abortFromClient = () => {
+    if (clientSignal?.reason?.code === "IMAGE_REQUEST_DEADLINE") {
+      deadlineExpired = true;
+      try { activeReader?.cancel(clientSignal.reason).catch(() => {}); } catch {}
+      return;
+    }
+    abortController.abort(clientSignal?.reason);
+    try { activeReader?.cancel(clientSignal?.reason).catch(() => {}); } catch {}
+  };
+  if (clientSignal?.aborted) abortFromClient();
+  else clientSignal?.addEventListener("abort", abortFromClient, { once: true });
+  let partialImageSent = false;
+  let submissionFinished = false;
+  const finishSubmission = (result) => {
+    if (submissionFinished || !submissionTicket || !onImageSubmissionResult) return Promise.resolve(false);
+    submissionFinished = true;
+    return Promise.resolve()
+      .then(() => onImageSubmissionResult(submissionTicket, { ...result, providerRequestId }))
+      .catch((error) => {
+        log?.warn?.("IMAGE", `Submission accounting update failed: ${error?.code || error?.name || "error"}`);
+        return false;
+      });
+  };
   const stream = new ReadableStream({
     async start(controller) {
       const enc = new TextEncoder();
       const send = (event, data) => {
-        controller.enqueue(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        if (!abortController.signal.aborted) {
+          controller.enqueue(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        }
       };
-      try {
-        const { imageB64: b64, usage, error: upstreamError } = await parseStream(providerResponse, log, {
-          onProgress: (info) => send("progress", info),
-          onPartialImage: (info) => send("partial_image", info),
+      if (deadlineExpired) {
+        finishSubmission({ outcome: "outcome_unknown", failureClass: "outcome_unknown" });
+        send("error", {
+          code: "image_outcome_unknown",
+          message: "The image request may have been accepted before its time budget expired. Check the existing operation before submitting it again.",
+          availability_state: "outcome_unknown",
+          retry_scope: "reconcile_existing",
         });
-        if (!b64) {
-          send("error", { message: upstreamError || "Codex completed without an image. No upstream image result was provided." });
+        controller.close();
+        return;
+      }
+      try {
+        const { imageB64: b64, usage, failure, error: upstreamError } = await parseStream(providerResponse, log, {
+          onReader: (reader) => { activeReader = reader; },
+          onProgress: (info) => send("progress", info),
+          onPartialImage: (info) => {
+            partialImageSent = true;
+            send("partial_image", info);
+          },
+        });
+        const hasImage = isUsableBase64Image(b64);
+        if (deadlineExpired && !hasImage && !failure) {
+          finishSubmission({ outcome: "outcome_unknown", failureClass: "outcome_unknown" });
+          send("error", {
+            code: "image_outcome_unknown",
+            message: "The image request may have been accepted before its time budget expired. Check the existing operation before submitting it again.",
+            availability_state: "outcome_unknown",
+            retry_scope: "reconcile_existing",
+          });
+          return;
+        }
+        if (!hasImage && failure) {
+          const bodyText = JSON.stringify({ error: failure });
+          const quotaObservation = classifyImageQuotaError({
+            provider: "codex",
+            status: 429,
+            bodyText,
+            headers: providerResponse.headers,
+            model,
+          });
+          if (quotaObservation) {
+            await finishSubmission({
+              outcome: "quota_rejected",
+              httpStatus: 429,
+              failureClass: "image_quota",
+              quotaGroupId: quotaObservation.quotaGroupId,
+              constraintId: quotaObservation.constraintId,
+              retryAt: quotaObservation.retryAt,
+              confidence: quotaObservation.confidence,
+              quotaObservations: quotaObservation.constraints || [quotaObservation],
+            });
+            const canRetry = !partialImageSent && !abortController.signal.aborted;
+            let fallbackResponse = null;
+            try {
+              fallbackResponse = await onQuotaObservation?.(quotaObservation, {
+                canRetry,
+                signal: abortController.signal,
+                isCancelled: () => abortController.signal.aborted,
+              });
+            } catch (error) {
+              log?.warn?.("IMAGE", `Quota fallback coordination failed: ${error?.code || error?.name || "error"}`);
+            }
+            if (canRetry && fallbackResponse instanceof Response && !abortController.signal.aborted) {
+              send("progress", { stage: "retrying_after_quota", retry_at: quotaObservation.retryAt });
+              await forwardQuotaFallbackResponse(
+                fallbackResponse,
+                controller,
+                send,
+                (reader) => { activeReader = reader; },
+                abortController.signal,
+              );
+            } else {
+              send("error", {
+                code: "image_quota_rejected",
+                message: "The image service rejected this request because the account reached its image quota.",
+                availability_state: "quota_blocked",
+                retry_at: quotaObservation.retryAt,
+                availability_confidence: quotaObservation.confidence,
+                availability_source: quotaObservation.source,
+                observed_at: quotaObservation.observedAt,
+                retry_scope: partialImageSent ? "reconcile_existing" : "new_request_after_check",
+              });
+            }
+          } else {
+            finishSubmission({ outcome: "outcome_unknown", failureClass: "outcome_unknown" });
+            send("error", {
+              code: "image_outcome_unknown",
+              message: "The image request may have been accepted before the provider stream failed. Check the existing operation before submitting it again.",
+              availability_state: "outcome_unknown",
+              retry_scope: "reconcile_existing",
+            });
+          }
+        } else if (!hasImage) {
+          finishSubmission({ outcome: "outcome_unknown", failureClass: "outcome_unknown" });
+          send("error", { message: upstreamError || "Codex completed without an image. No upstream image result was provided.", availability_state: "outcome_unknown", retry_scope: "reconcile_existing" });
         } else {
-          if (usage && onUsage) await onUsage(usage);
-          if (onSuccess) await onSuccess();
+          finishSubmission({ outcome: "succeeded", httpStatus: providerResponse.status, outputCount: 1, usage });
+          if (usage && onUsage) {
+            const usageRecording = Promise.resolve()
+              .then(() => onUsage(usage))
+              .catch((error) => log?.warn?.("IMAGE", `Usage recording failed: ${error?.code || error?.name || "error"}`));
+            await waitForStreamSignal(usageRecording, clientSignal);
+          }
+          if (onSuccess) {
+            const successBookkeeping = Promise.resolve()
+              .then(() => onSuccess())
+              .catch((error) => log?.warn?.("IMAGE", `Success bookkeeping failed: ${error?.code || error?.name || "error"}`));
+            await waitForStreamSignal(successBookkeeping, clientSignal);
+          }
           send("done", { created: nowSec(), data: [{ b64_json: b64 }] });
         }
       } catch (err) {
-        send("error", {
-          message: err?.message || "Stream failed",
-          ...(err?.code ? { code: err.code } : {}),
-          ...(err?.type ? { type: err.type } : {}),
-          ...(err?.param ? { param: err.param } : {}),
-        });
+        finishSubmission({ outcome: "outcome_unknown", failureClass: "outcome_unknown" });
+        if (deadlineExpired) {
+          send("error", {
+            code: "image_outcome_unknown",
+            message: "The image request may have been accepted before its time budget expired. Check the existing operation before submitting it again.",
+            availability_state: "outcome_unknown",
+            retry_scope: "reconcile_existing",
+          });
+        } else {
+          send("error", {
+            code: "image_outcome_unknown",
+            message: err?.message || "The image request may have been accepted before the provider stream failed. Check the existing operation before submitting it again.",
+            ...(err?.code ? { provider_code: err.code } : {}),
+            ...(err?.type ? { type: err.type } : {}),
+            ...(err?.param ? { param: err.param } : {}),
+            availability_state: "outcome_unknown",
+            retry_scope: "reconcile_existing",
+          });
+        }
       } finally {
-        controller.close();
+        clientSignal?.removeEventListener("abort", abortFromClient);
+        if (!abortController.signal.aborted) controller.close();
       }
+    },
+    async cancel(reason) {
+      abortController.abort(reason);
+      try { await activeReader?.cancel(reason); } catch {}
     },
   });
   return new Response(stream, {
@@ -314,9 +502,7 @@ export default {
   buildHeaders: (creds, requestBody) => {
     const accountId = creds?.providerSpecificData?.chatgptAccountId || decodeAccountId(creds?.idToken);
     return {
-      "accept": requestBody?.prompt && !requestBody?.input
-        ? "application/json"
-        : "text/event-stream, application/json",
+      "accept": requestBody?.prompt && !requestBody?.input ? "application/json" : "text/event-stream, application/json",
       "authorization": `Bearer ${creds?.accessToken || ""}`,
       "chatgpt-account-id": accountId || "",
       "content-type": "application/json",
@@ -329,7 +515,6 @@ export default {
   },
   buildBody: (model, body) => {
     if (shouldUseNativeGeneration(model, body)) return buildNativeGenerationBody(model, body);
-
     const refs = [];
     if (Array.isArray(body.images)) body.images.forEach((i) => { const u = toDataUrl(i); if (u) refs.push(u); });
     const single = toDataUrl(body.image);
@@ -343,8 +528,6 @@ export default {
     }
     if (body.size && body.size !== "") imgTool.size = body.size;
     if (body.quality && body.quality !== "") imgTool.quality = body.quality;
-    // The ChatGPT Codex backend currently rejects every explicit complexity level.
-    // Omit it so GPT Image 2.6 uses its supported upstream default.
     if (body.background && body.background !== "") imgTool.background = body.background;
     return {
       model: responsesModel,
@@ -360,7 +543,7 @@ export default {
     };
   },
   // Custom: codex parses SSE → either pipe to client or collect b64
-  async parseResponse(response, { log, streamToClient, onRequestSuccess, onUsage, requestBody }) {
+  async parseResponse(response, { log, streamToClient, onRequestSuccess, onUsage, onQuotaObservation, onImageSubmissionResult, submissionTicket, providerRequestId, model, signal, requestBody }) {
     if (requestBody?.prompt && !requestBody?.input) {
       let payload;
       try {
@@ -369,33 +552,55 @@ export default {
         throw new Error("Codex Images API returned invalid JSON.");
       }
       const data = Array.isArray(payload?.data) ? payload.data : [];
-      if (!data.some((item) => item?.b64_json || item?.url)) {
+      if (!hasUsableImagePayload({ data })) {
         const error = payload?.error || {};
         const err = new Error(error.message || "Codex Images API returned no image.");
         for (const key of ["code", "type", "param"]) {
           if (typeof error[key] === "string") err[key] = error[key];
+        }
+        if (isCodexImageUsageFailure(error)) {
+          err.status = 429;
+          err.bodyText = JSON.stringify({ error });
+          err.headers = response.headers;
         }
         throw err;
       }
       const result = { created: payload.created || nowSec(), data };
       const usage = normalizeResponsesUsage(payload.usage);
       if (streamToClient) {
-        if (usage && onUsage) await onUsage(usage);
-        if (onRequestSuccess) await onRequestSuccess();
+        if (submissionTicket && onImageSubmissionResult) {
+          await onImageSubmissionResult(submissionTicket, { outcome: "succeeded", httpStatus: response.status, outputCount: data.length, usage, providerRequestId });
+        }
+        for (const callback of [usage && onUsage ? () => onUsage(usage) : null, onRequestSuccess]) {
+          if (callback) await waitForStreamSignal(Promise.resolve().then(callback).catch((error) => log?.warn?.("IMAGE", `Image bookkeeping failed: ${error?.code || error?.name || "error"}`)), signal);
+        }
         return { sseResponse: nativeImageSseResponse(result) };
       }
-      if (usage && onUsage) await onUsage(usage);
+      if (usage && onUsage) {
+        try { await onUsage(usage); } catch (error) { log?.warn?.("IMAGE", `Usage recording failed: ${error?.code || error?.name || "error"}`); }
+      }
       return result;
     }
 
     if (streamToClient) {
-      return { sseResponse: buildSseResponse(response, log, onRequestSuccess, onUsage) };
+      return { sseResponse: buildSseResponse(response, log, onRequestSuccess, onUsage, onQuotaObservation, onImageSubmissionResult, submissionTicket, providerRequestId, model, signal) };
     }
-    const { imageB64: b64, usage, error: upstreamError } = await parseStream(response, log);
-    if (!b64) {
+    const { imageB64: b64, usage, failure, error: upstreamError } = await parseStream(response, log);
+    if (!isUsableBase64Image(b64)) {
+      if (isCodexImageUsageFailure(failure)) {
+        const error = new Error(failure.message || "Codex image usage limit reached.");
+        error.status = 429;
+        error.bodyText = JSON.stringify({ error: failure });
+        error.headers = response.headers;
+        throw error;
+      }
       throw new Error(upstreamError || "Codex completed without an image. No upstream image result was provided.");
     }
-    if (usage && onUsage) await onUsage(usage);
+    if (usage && onUsage) {
+      try { await onUsage(usage); } catch (error) {
+        log?.warn?.("IMAGE", `Usage recording failed: ${error?.code || error?.name || "error"}`);
+      }
+    }
     return { created: nowSec(), data: [{ b64_json: b64 }] };
   },
   normalize: (responseBody) => responseBody,

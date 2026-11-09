@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getSettings: vi.fn(),
   resolveConnectionProxyConfig: vi.fn(),
   getAntigravityUsage: vi.fn(),
+  getImageQuotaState: vi.fn(),
 }));
 
 vi.mock("@/lib/localDb", () => ({
@@ -22,6 +23,15 @@ vi.mock("@/shared/constants/providers.js", () => ({
   FREE_PROVIDERS: {},
   resolveProviderId: (provider) => provider,
 }));
+vi.mock("@/lib/db/repos/imageQuotaRepo.js", () => ({
+  getImageQuotaState: mocks.getImageQuotaState,
+  acquireImageQuotaProbeLeases: vi.fn(),
+  admitImageQuotaRequest: vi.fn(),
+  finishImageQuotaProbe: vi.fn(),
+  imageQuotaIdentity: vi.fn(),
+  imageQuotaIdentityGeneration: vi.fn(),
+  recordImageQuotaObservation: vi.fn(),
+}));
 vi.mock("open-sse/services/usage/google.js", () => ({
   getAntigravityUsage: mocks.getAntigravityUsage,
 }));
@@ -31,6 +41,7 @@ const { getAntigravityQuotaCache, handleAntigravityQuotaError, refreshAntigravit
 const { getProviderCredentials } = await import("@/sse/services/auth.js");
 
 const MODEL = "claude-opus-4-6-thinking";
+const IMAGE_MODEL = "gemini-3.1-flash-image";
 const FUTURE_RESET = "2026-09-01T00:00:00.000Z";
 
 beforeEach(() => {
@@ -38,6 +49,10 @@ beforeEach(() => {
   getAntigravityQuotaCache().clear();
   mocks.resolveConnectionProxyConfig.mockResolvedValue({});
   mocks.getSettings.mockResolvedValue({});
+  mocks.getImageQuotaState.mockImplementation(async (connections) => new Map(connections.map((connection) => [
+    connection.id,
+    { blockingRows: [], expiredRows: [], manualPolicy: null, policyRevision: 0, probeInProgressRows: [] },
+  ])));
 });
 
 describe("Antigravity quota-aware routing", () => {
@@ -51,9 +66,12 @@ describe("Antigravity quota-aware routing", () => {
     try {
       await expect(handleAntigravityQuotaError("ag-a", 429, MODEL, "token", {}))
         .resolves.toBe(Date.parse(FUTURE_RESET));
-      expect(getAntigravityQuotaCache().get("ag-a")[MODEL]).toEqual({
+      expect(getAntigravityQuotaCache().get("ag-a")[MODEL]).toMatchObject({
         remainingPercentage: 0,
         resetAt: FUTURE_RESET,
+        quotaStatus: "reported",
+        quotaSource: "antigravity_usage",
+        quotaConfidence: "unknown",
       });
     } finally {
       vi.useRealTimers();
@@ -112,6 +130,65 @@ describe("Antigravity quota-aware routing", () => {
         connectionId: "ag-a",
         connectionName: "a@example.com",
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not pre-block an image account when its cached provider fraction is unknown", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T00:00:00.000Z"));
+    mocks.getProviderConnections.mockResolvedValue([
+      { id: "ag-a", email: "a@example.com", provider: "antigravity", isActive: true },
+    ]);
+    getAntigravityQuotaCache().set("ag-a", {
+      [IMAGE_MODEL]: {
+        remainingPercentage: null,
+        quotaStatus: "unknown",
+        resetAt: FUTURE_RESET,
+      },
+    });
+
+    try {
+      await expect(getProviderCredentials("antigravity", null, IMAGE_MODEL, { capability: "image_generation" })).resolves.toMatchObject({
+        connectionId: "ag-a",
+        connectionName: "a@example.com",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns image availability metadata when Antigravity provider usage blocks the whole pool", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T00:00:00.000Z"));
+    mocks.getProviderConnections.mockResolvedValue([
+      { id: "ag-a", email: "a@example.com", provider: "antigravity", isActive: true },
+    ]);
+    getAntigravityQuotaCache().set("ag-a", {
+      [IMAGE_MODEL]: {
+        remainingPercentage: 0,
+        resetAt: FUTURE_RESET,
+        quotaStatus: "reported",
+        quotaSource: "antigravity_usage",
+        quotaConfidence: "provider_confirmed",
+        observedAt: "2026-08-25T23:00:00.000Z",
+      },
+    });
+
+    try {
+      await expect(getProviderCredentials("antigravity", null, IMAGE_MODEL, { capability: "image_generation" }))
+        .resolves.toMatchObject({
+          allRateLimited: true,
+          retryAfter: FUTURE_RESET,
+          imageQuotaAvailability: {
+            state: "provider_usage_blocked",
+            retryAt: FUTURE_RESET,
+            confidence: "provider_confirmed",
+            observedAt: "2026-08-25T23:00:00.000Z",
+            source: "antigravity_usage",
+          },
+        });
     } finally {
       vi.useRealTimers();
     }
@@ -395,4 +472,3 @@ describe("Antigravity quota-aware routing", () => {
       vi.useRealTimers();
     }
   });
-

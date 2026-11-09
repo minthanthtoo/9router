@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+let imageRemainingFraction = 0.42;
 const proxyAwareFetch = vi.fn(async (url) => ({
   ok: true,
   status: 200,
@@ -19,6 +20,13 @@ const proxyAwareFetch = vi.fn(async (url) => ({
             displayName: "Gemini 3.8 Flash (Low)",
             quotaInfo: { remainingFraction: 0.35, resetTime: "2026-08-25T12:00:00Z" },
           },
+          "gemini-3.1-flash-image": {
+            displayName: "Gemini 3.1 Flash Image",
+            quotaInfo: {
+              ...(imageRemainingFraction === undefined ? {} : { remainingFraction: imageRemainingFraction }),
+              resetTime: "2026-08-25T12:00:00Z",
+            },
+          },
           "internal-model": {
             displayName: "Internal",
             isInternal: true,
@@ -34,7 +42,10 @@ vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
 }));
 
 describe("Antigravity quota tracker: Gemini 3.8 Flash usage bars", () => {
-  beforeEach(() => proxyAwareFetch.mockClear());
+  beforeEach(() => {
+    proxyAwareFetch.mockClear();
+    imageRemainingFraction = 0.42;
+  });
 
   it("returns Gemini 3.8 Flash tier quotas so the dashboard can render usage bars", async () => {
     const { getAntigravityUsage } = await import("../../open-sse/services/usage/google.js");
@@ -56,6 +67,35 @@ describe("Antigravity quota tracker: Gemini 3.8 Flash usage bars", () => {
       used: 650,
       total: 1000,
       remainingPercentage: 35,
+    });
+  });
+
+  it("keeps the Gemini image quota on a normalized percentage scale without calling it requests", async () => {
+    const { getAntigravityUsage } = await import("../../open-sse/services/usage/google.js");
+
+    const usage = await getAntigravityUsage("access-token", {});
+
+    expect(usage.quotas["gemini-3.1-flash-image"]).toMatchObject({
+      used: 580,
+      total: 1000,
+      remainingPercentage: 42,
+      displayUnit: "normalized_percentage",
+      quotaStatus: "reported",
+    });
+  });
+
+  it("keeps an image quota with no fraction unknown instead of treating it as exhausted", async () => {
+    imageRemainingFraction = undefined;
+    const { getAntigravityUsage } = await import("../../open-sse/services/usage/google.js");
+
+    const usage = await getAntigravityUsage("access-token", {});
+
+    expect(usage.quotas["gemini-3.1-flash-image"]).toMatchObject({
+      used: 0,
+      total: 0,
+      remainingPercentage: null,
+      displayUnit: "normalized_percentage",
+      quotaStatus: "unknown",
     });
   });
 });

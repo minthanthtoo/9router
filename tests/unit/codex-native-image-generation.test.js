@@ -65,6 +65,35 @@ describe("native Codex OAuth image generation", () => {
     expect(onUsage).not.toHaveBeenCalled();
   });
 
+
+  it.each([false, true])("accounts once for a validated native result (stream=%s)", async (streamToClient) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse()));
+    const ticket = { id: "native-submission" };
+    const onImageSubmissionResult = vi.fn();
+    const result = await handleImageGenerationCore(request({
+      streamToClient,
+      onImageSubmissionStart: vi.fn().mockResolvedValue(ticket),
+      onImageSubmissionResult,
+    }));
+    await result.response.text();
+    await vi.waitFor(() => expect(onImageSubmissionResult).toHaveBeenCalledTimes(1));
+    expect(onImageSubmissionResult).toHaveBeenCalledWith(ticket, expect.objectContaining({ outcome: "succeeded", outputCount: 1 }));
+  });
+
+  it.each([[], [{ b64_json: "!!!" }], [{ url: "javascript:invalid" }]])("holds unvalidated native output without a second dispatch: %j", async (data) => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data }));
+    vi.stubGlobal("fetch", fetchMock);
+    const onImageSubmissionResult = vi.fn();
+    const result = await handleImageGenerationCore(request({
+      streamToClient: true,
+      onImageSubmissionStart: vi.fn().mockResolvedValue({ id: "held" }),
+      onImageSubmissionResult,
+    }));
+    expect(result.success).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(onImageSubmissionResult).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: "outcome_unknown" })));
+  });
+
   it("retains binary image output", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse()));
     const result = await handleImageGenerationCore(request({ binaryOutput: true }));
@@ -163,7 +192,8 @@ describe("legacy Codex image Responses compatibility", () => {
       onRequestSuccess,
     }));
     const output = await result.response.text();
-    expect(output).toContain(sse("error", { message: error.message, code: error.code, type: error.type, param: error.param }));
+    const failure = output.split("\n\n").find((block) => block.startsWith("event: error\n"));
+    expect(JSON.parse(failure.split("data: ")[1])).toMatchObject({ message: error.message, provider_code: error.code, type: error.type, param: error.param, availability_state: "outcome_unknown", retry_scope: "reconcile_existing" });
     expect(output).not.toContain("paid ChatGPT plan required");
     expect(onRequestSuccess).not.toHaveBeenCalled();
     expect(cancelled).toBe(true);

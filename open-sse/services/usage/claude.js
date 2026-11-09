@@ -44,6 +44,7 @@ export async function getClaudeUsage(accessToken, proxyOptions = null, options =
     const result = await fetchClaudeUsageRaw(accessToken, proxyOptions);
     // Only cache real quota data, not soft-failure {message: ...} payloads
     if (accessToken && result?.quotas) {
+      result.observedAt = new Date().toISOString();
       usageCache.set(accessToken, {
         result,
         expiresAt: Date.now() + USAGE_CACHE_TTL_MS,

@@ -27,7 +27,7 @@ export async function GET() {
       ...safeSettings, 
       enableRequestLogs,
       enableTranslator,
-      hasPassword: !!password
+      hasPassword: !!(password || process.env.INITIAL_PASSWORD)
     }, { headers: SETTINGS_RESPONSE_HEADERS });
   } catch (error) {
     console.log("Error getting settings:", error);
@@ -38,7 +38,14 @@ export async function GET() {
 export async function PATCH(request) {
   try {
     const body = await request.json();
+    if (Object.prototype.hasOwnProperty.call(body, "aurixImageRouting")) return NextResponse.json({error:"Use the versioned image routing endpoint"},{status:400});
 
+    if (body.providerStrategies && Object.values(body.providerStrategies).some(value => value && Object.hasOwn(value, "rotationSequence"))) {
+      const current = await getSettings();
+      for (const [provider, value] of Object.entries(body.providerStrategies)) {
+        if (value && Object.hasOwn(value, "rotationSequence") && JSON.stringify(value.rotationSequence) !== JSON.stringify(current.providerStrategies?.[provider]?.rotationSequence)) return NextResponse.json({ error: "Use the rotation sequence editor" }, { status: 400 });
+      }
+    }
     // Strip protected secrets before any internal handling sets them
     for (const key of PROTECTED_SETTING_KEYS) delete body[key];
 

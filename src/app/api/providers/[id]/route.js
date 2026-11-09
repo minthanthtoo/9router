@@ -6,6 +6,7 @@ import {
   deleteProviderConnection,
 } from "@/models";
 import { toProviderConnectionResponse, usesAwsCredentialForm } from "@/lib/providerConnectionResponse";
+import { normalizeGeminiProjectId } from "@/lib/geminiProjectId";
 
 function normalizeProxyConfig(body = {}) {
   const hasAnyProxyField =
@@ -130,6 +131,21 @@ export async function PUT(request, { params }) {
       )
     ) {
       const incomingProviderSpecificData = { ...(providerSpecificData || {}) };
+      if (existing.provider === "gemini" && (
+        Object.hasOwn(incomingProviderSpecificData, "googleCloudProjectId")
+        || Object.hasOwn(incomingProviderSpecificData, "projectId")
+      )) {
+        const projectId = normalizeGeminiProjectId(
+          incomingProviderSpecificData.googleCloudProjectId ?? incomingProviderSpecificData.projectId,
+        );
+        if (!projectId) {
+          return NextResponse.json({
+            error: "A valid Google Cloud project ID or project number is required for Gemini API credentials",
+            code: "GEMINI_PROJECT_ID_REQUIRED",
+          }, { status: 400 });
+        }
+        incomingProviderSpecificData.googleCloudProjectId = projectId;
+      }
       const isAwsCredential = usesAwsCredentialForm(existing.provider);
       // The edit form cannot read the stored token back. An empty password field means
       // keep the saved credential; null explicitly removes it.

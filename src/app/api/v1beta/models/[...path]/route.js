@@ -10,6 +10,8 @@ import { PROVIDER_MODELS } from "@/shared/constants/models";
 import { GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS } from "open-sse/config/runtimeConfig.js";
 import { initTranslators } from "open-sse/translator/index.js";
 import { getKeyAccessContext, enforceKeyAccessResolved } from "@/sse/services/keyAccess.js";
+import { getModelType, PROVIDER_ID_TO_ALIAS } from "open-sse/config/providerModels.js";
+import { requestsImageOutput, imageGenerationRequiresManagedRouteResponse } from "open-sse/utils/managedImageRoute.js";
 
 let initialized = false;
 const GEMINI_NATIVE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -84,6 +86,16 @@ export async function POST(request, { params }) {
     }
 
     const body = await request.json();
+
+    // Check before AUDIO passthrough or conversion can bypass/drop image output intent.
+    if (requestsImageOutput(body)
+      || ["image", "imageGen"].includes(getModelType(PROVIDER_ID_TO_ALIAS.gemini || "gemini", normalizeGeminiNativeModel(model)))) {
+      const authError = await validateGeminiNativeClientKey(request);
+      if (authError) return authError;
+      const accessDenied = await enforceKeyAccessResolved(await getKeyAccessContext(request), model, "gemini", normalizeGeminiNativeModel(model));
+      if (accessDenied) return accessDenied;
+      return imageGenerationRequiresManagedRouteResponse();
+    }
 
     if (isGeminiNativeTtsRequest(model, body)) {
       return await forwardGeminiNativeRequest(request, body, model, action);

@@ -1,0 +1,9 @@
+{
+  "name": "9router-lazy-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "playwright-core": "1.62.1",
+    "wreq-js": "3.2.0"
+  }
+}

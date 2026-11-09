@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+// OAuth contracts mock the transport boundary; proxy behavior has its own suite.
+vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
+  proxyAwareFetch: (...args) => globalThis.fetch(...args),
+}));
+
+
+
 describe("xai/oauth service", () => {
   beforeEach(() => {
     vi.resetModules();

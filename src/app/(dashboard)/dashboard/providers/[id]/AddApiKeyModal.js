@@ -5,6 +5,7 @@ import PropTypes from "prop-types";
 import { Button, Badge, Input, Modal, Select } from "@/shared/components";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { planBulkAdd } from "@/shared/utils/bulkAdd";
+import { isValidGeminiProjectId, normalizeGeminiProjectId } from "@/lib/geminiProjectId";
 
 const BULK_PLACEHOLDER = `name1|sk-key1\nname2|sk-key2\nsk-key-only-auto-named`;
 
@@ -33,6 +34,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
   const [formData, setFormData] = useState({
     name: "",
     apiKey: "",
+    googleCloudProjectId: "",
     defaultModel: "",
     priority: 1,
     proxyPoolId: NONE_PROXY_POOL_VALUE,
@@ -90,6 +92,10 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
   const [bulkResult, setBulkResult] = useState(null); // { success, failed }
 
   const buildProviderSpecificData = () => {
+    if (provider === "gemini") {
+      const googleCloudProjectId = normalizeGeminiProjectId(formData.googleCloudProjectId);
+      return googleCloudProjectId ? { googleCloudProjectId } : undefined;
+    }
     if (isOllamaLocal && formData.ollamaHostUrl.trim()) {
       return { baseUrl: formData.ollamaHostUrl.trim() };
     }
@@ -125,6 +131,9 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
   // clickable while silently doing nothing for profile-only Bedrock connections.
   const apiKeySatisfied = () => {
     const psd = buildProviderSpecificData();
+    if (provider === "gemini") {
+      return !!formData.apiKey && isValidGeminiProjectId(psd?.googleCloudProjectId);
+    }
     if (apiKeyOptionalWith && psd?.[apiKeyOptionalWith]) return true;
     // AWS static keys are a pair: a secret alone saves a connection that can never sign.
     if (usesAwsCredentialForm) return !!formData.apiKey && !!psd?.accessKeyId;
@@ -192,6 +201,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
   };
 
   const handleBulkSubmit = async () => {
+    if (provider === "gemini" && !isValidGeminiProjectId(formData.googleCloudProjectId)) return;
     const lines = bulkText.split("\n");
     if (!lines.length) return;
     // Plan collision-free names against existing connections so a generated
@@ -213,7 +223,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
           const vres = await fetch("/api/providers/validate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ provider, apiKey: entry.apiKey }),
+            body: JSON.stringify({ provider, apiKey: entry.apiKey, providerSpecificData: buildProviderSpecificData() }),
           });
           const vdata = await vres.json().catch(() => ({}));
           isValid = !!vdata.valid;
@@ -229,7 +239,9 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
             name: entry.name,
             priority: 1,
             testStatus: isValid ? "active" : "unknown",
-            ...(entry.providerSpecificData ? { providerSpecificData: entry.providerSpecificData } : {}),
+            ...((entry.providerSpecificData || buildProviderSpecificData()) ? {
+              providerSpecificData: { ...(entry.providerSpecificData || {}), ...(buildProviderSpecificData() || {}) },
+            } : {}),
           }),
         });
         if (res.ok) success++;
@@ -257,6 +269,17 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
           </div>
         )}
 
+        {provider === "gemini" && (
+          <Input
+            label="Google Cloud project ID or number"
+            value={formData.googleCloudProjectId}
+            onChange={(e) => setFormData({ ...formData, googleCloudProjectId: e.target.value.trim().toLowerCase() })}
+            placeholder="my-gemini-project"
+            maxLength={30}
+            hint="Gemini API quotas are shared by project. Use the same project ID or number for every key from that billed project."
+          />
+        )}
+
         {mode === "bulk" && (
           <div className="flex flex-col gap-3">
             <p className="text-xs text-text-muted">
@@ -279,7 +302,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
               </div>
             )}
             <div className="flex gap-2">
-              <Button onClick={handleBulkSubmit} fullWidth disabled={saving || !bulkText.trim()}>
+              <Button onClick={handleBulkSubmit} fullWidth disabled={saving || !bulkText.trim() || (provider === "gemini" && !isValidGeminiProjectId(formData.googleCloudProjectId))}>
                 {saving ? "Adding..." : "Add All Keys"}
               </Button>
               <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>

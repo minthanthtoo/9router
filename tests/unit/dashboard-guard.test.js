@@ -70,6 +70,14 @@ describe("dashboard guard public LLM API access", () => {
     expect(mocks.validateApiKey).not.toHaveBeenCalled();
   });
 
+  it("passes only the image quota management route to its route-level auth", async () => {
+    const response = await proxy(request("/api/private/image-quota/v1", { host: "router.example.com" }));
+    expect(response).toBe(mocks.nextResponse);
+
+    const nested = await proxy(request("/api/private/image-quota/v1/other", { host: "router.example.com" }));
+    expect(nested.status).toBe(401);
+  });
+
   it("rejects remote Host-spoof when real peer IP is non-loopback", async () => {
     const response = await proxy(localRequest("/v1/chat/completions", {
       host: "localhost",

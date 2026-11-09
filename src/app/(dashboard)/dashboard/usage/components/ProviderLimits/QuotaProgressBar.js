@@ -2,6 +2,7 @@
 
 import { cn } from "@/shared/utils/cn";
 import { formatResetTime } from "./utils";
+import { getQuotaUsageDisplay } from "./quotaUsageDisplay.mjs";
 
 // Calculate color based on remaining percentage
 const getColorClasses = (remainingPercentage) => {
@@ -71,10 +72,16 @@ export default function QuotaProgressBar({
   unlimited = false,
   resetTime = null,
   recurring = true,
+  displayUnit = null,
+  quotaStatus = null,
 }) {
-  const colors = getColorClasses(percentage);
-  const countdown = formatResetTime(resetTime);
+  const statusUnknown = quotaStatus === "unknown" || !Number.isFinite(percentage);
+  const colors = statusUnknown
+    ? { text: "text-text-muted", bg: "bg-black/20", bgLight: "bg-black/5", emoji: "⚪" }
+    : getColorClasses(percentage);
+  const countdown = statusUnknown ? "-" : formatResetTime(resetTime);
   const resetDisplay = formatResetTimeDisplay(resetTime);
+  const usageDisplay = getQuotaUsageDisplay({ used, total, displayUnit, quotaStatus });
 
   // recurring defaults true. One-shot packs (e.g. CodeBuddy CN bonus packs)
   // set recurring:false: resetTime is a hard expiry, so word it as "expires".
@@ -93,13 +100,13 @@ export default function QuotaProgressBar({
         <div className="flex items-center gap-1.5">
           <span className="text-xs">{colors.emoji}</span>
           <span className={cn("font-medium", colors.text)}>
-            {remaining}%
+            {statusUnknown ? "Unknown" : `${remaining}%`}
           </span>
         </div>
       </div>
 
       {/* Progress bar */}
-      {!unlimited && (
+      {!unlimited && !statusUnknown && (
         <div className={cn("h-2 rounded-full overflow-hidden", colors.bgLight)}>
           <div
             className={cn("h-full transition-all duration-300", colors.bg)}
@@ -110,9 +117,7 @@ export default function QuotaProgressBar({
 
       {/* Usage details and countdown */}
       <div className="flex items-center justify-between text-xs text-text-muted">
-        <span>
-          {used.toLocaleString()} / {total.toLocaleString()} requests
-        </span>
+        <span title={usageDisplay.title}>{usageDisplay.text}</span>
         {countdown !== "-" && (
           <div className="flex items-center gap-1">
             <span>•</span>
@@ -124,7 +129,7 @@ export default function QuotaProgressBar({
       {/* Reset time display */}
       {resetDisplay && (
         <div className="text-xs text-text-muted/70">
-          {resetWord} at {resetDisplay}
+          {statusUnknown ? `Provider time ${resetDisplay} · quota availability unknown` : `${resetWord} at ${resetDisplay}`}
         </div>
       )}
     </div>
