@@ -130,3 +130,19 @@ test('weekly reset sorting recognizes provider snake_case window names without u
   const segments = segmentVisibleConnections(accounts, quotaData, [{key: 'weekly-reset', direction: 'asc'}], now);
   assert.deepEqual(segments.flatMap(segment => segment.connections.map(connection => connection.id)), ['early', 'late', 'short-only', 'unknown']);
 });
+
+
+test('Codex summaries and simple sorting honor declared weekly primary windows', async () => {
+  const {parseQuotaData, segmentVisibleConnections, getConnectionQuotaRemaining} = await import('../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/utils.js');
+  const now=Date.now(), accounts=[{id:'late',provider:'codex'},{id:'early',provider:'codex'},{id:'short',provider:'codex'}];
+  const data=Object.fromEntries(accounts.map((account,index)=>[account.id,{quotas:parseQuotaData('codex',{quotas:{session:{used:20,total:100,remaining:80,quotaStatus:'reported',windowSeconds:index===2?18000:604800,resetAt:new Date(now+(index===0?7200000:index===1?3600000:60000)).toISOString()}}})}]));
+  assert.equal(data.early.quotas[0].name,'Weekly');
+  assert.equal(data.short.quotas[0].name,'5h');
+  assert.equal(getConnectionQuotaRemaining(accounts[1],data,'weekly'),80);
+  assert.equal(getConnectionQuotaRemaining(accounts[1],data,'session'),null);
+  assert.deepEqual(segmentVisibleConnections(accounts,data,[{key:'weekly-reset',direction:'asc'}],now).flatMap(group=>group.connections.map(account=>account.id)),['early','late','short']);
+  const longWait=parseQuotaData('codex',{quotas:{session:{used:100,total:100,windowSeconds:18000,resetAt:new Date(now+7*86400000).toISOString()}}});
+  assert.equal(longWait[0].name,'5h','countdown length alone must not rename a window');
+  const unknown={unknown:{quotas:parseQuotaData('codex',{quotas:{session:{used:0,total:100,quotaStatus:'unknown',windowSeconds:604800}}})}};
+  assert.equal(getConnectionQuotaRemaining({id:'unknown'},unknown,'weekly'),null);
+});

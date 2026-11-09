@@ -116,6 +116,7 @@ export function updateQuotaRotationPreview(current, provider, model, sorts, rese
 }
 
 function matchesQuotaWindow(quota, window) {
+  if (Number.isSafeInteger(quota.windowSeconds) && quota.windowSeconds > 0) return window === "weekly" ? quota.windowSeconds === 604800 : quota.windowSeconds <= 86400;
   const label = `${quota.quotaType || ""} ${quota.modelKey || ""} ${quota.name || ""}`.replace(/[_-]+/g, " ");
   const weekly = /\b(?:weekly|7d|7\s*days?|seven\s*days?)\b/i.test(label);
   return window === "weekly" ? weekly : !weekly && /\b(?:session|hourly|5h|five\s*hours?|\d+(?:\.\d+)?\s*h|\d+\s*hours?)\b/i.test(label);
@@ -156,7 +157,7 @@ export function getConnectionLabel(connection) {
 
 export function getConnectionQuotaRemaining(connection, quotaData, window = "session") {
   const quotas = quotaData[connection.id]?.quotas || [];
-  const primary = quotas.find(quota => quota.quotaType === window);
+  const primary = quotas.find(quota => quota.quotaType === window && matchesQuotaWindow(quota, window));
   const values = (primary ? [primary] : quotas.filter(quota => matchesQuotaWindow(quota, window)))
     .map(quota => {
       if (quota.quotaStatus === "unknown") return null;
@@ -757,6 +758,12 @@ export function parseQuotaData(provider, data) {
               const duration=seconds?seconds%86400===0?`${seconds/86400}d`:seconds%3600===0?`${seconds/3600}h`:seconds%60===0?`${seconds/60}m`:`${seconds}s`:"reported window";
               displayName=`${quota.limitId === "imagegen_premium" ? "Images Premium" : "Images"} (${duration})`;
             }
+            else if (Number.isSafeInteger(quota.windowSeconds) && quota.windowSeconds > 0) {
+              const seconds = quota.windowSeconds;
+              const duration = seconds === 604800 ? "Weekly" : seconds % 86400 === 0 ? `${seconds / 86400}d` : seconds % 3600 === 0 ? `${seconds / 3600}h` : seconds % 60 === 0 ? `${seconds / 60}m` : `${seconds}s`;
+              const family = quotaType.startsWith("spark_") ? "Spark" : quotaType.startsWith("review_") ? "Review" : "";
+              displayName = family ? `${family} (${duration})` : duration;
+            }
             else if (quotaType === "spark_session") displayName = "Spark (5h)";
             else if (quotaType === "spark_weekly") displayName = "Spark (Weekly)";
             else if (quotaType === "session") displayName = "5h";
@@ -767,6 +774,8 @@ export function parseQuotaData(provider, data) {
             normalizedQuotas.push({
               name: displayName,
               quotaType,
+              windowSeconds: quota.windowSeconds,
+              quotaStatus: quota.quotaStatus,
               ...(quota.quotaKind === "image_generation" ? { displayUnit: "provider_percentage" } : {}),
               used: quota.used || 0,
               total: quota.total || 0,
