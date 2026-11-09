@@ -9,6 +9,13 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// OAuth contracts mock the transport boundary; proxy behavior has its own suite.
+vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
+  proxyAwareFetch: (...args) => globalThis.fetch(...args),
+}));
+
+
+
 const originalFetch = global.fetch;
 
 describe("Codex Refresh Token", () => {

@@ -152,6 +152,15 @@ export const PROVIDER_ID_TO_ALIAS = Object.fromEntries(
   REGISTRY.map(r => [r.id, r.alias || r.id])
 );
 
+export function supportsImageEdit(providerId, modelId) {
+  const registry = REGISTRY.find((entry) => entry.id === providerId || entry.alias === providerId || entry.aliases?.includes(providerId));
+  const id = registry?.id || providerId;
+  const alias = registry?.alias || id;
+  const model = (PROVIDER_MODELS[alias] || []).find((entry) => entry.id === modelId);
+  const isImage = (model?.kind || model?.type) === "image" || model?.imageGen === true;
+  return Boolean(isImage && (id === "gemini" || id === "antigravity" || model.capabilities?.includes("edit")));
+}
+
 export function getModelsByProviderId(providerId) {
   const alias = PROVIDER_ID_TO_ALIAS[providerId] || providerId;
   return PROVIDER_MODELS[alias] || [];

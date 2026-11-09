@@ -44,6 +44,10 @@ function applyActiveStrikeBlocks(connectionId, quotas) {
     quotas[key.slice(connectionId.length + 1)] = {
       remainingPercentage: 0,
       resetAt: new Date(until).toISOString(),
+      quotaStatus: "blocked_by_strike",
+      quotaSource: "quota_strike_circuit_breaker",
+      quotaConfidence: "estimated",
+      observedAt: new Date(now).toISOString(),
     };
   }
   return quotas;
@@ -149,6 +153,7 @@ export function getAntigravityModelQuota(quotas, model) {
     exhausted.sort((a, b) => b.resetMs - a.resetMs);
     const primary = exhausted[0];
     return {
+      ...primary,
       used: primary.used ?? 1000,
       total: primary.total ?? 1000,
       remainingPercentage: 0,
@@ -196,6 +201,33 @@ export function clearAntigravityStrikes(connectionId, model) {
  */
 export function getAntigravityQuotaCache() {
   return quotaCache;
+}
+
+export function getAntigravityQuotaBlockForConnection(connectionId, model, cache = quotaCache, nowMs = Date.now()) {
+  if (!connectionId || !model || !cache) return null;
+  const quotas = cache.get(connectionId);
+  const quota = getAntigravityModelQuota(quotas, model) || quotas?.[model];
+  if (!quota || quota.quotaStatus === "unknown" || typeof quota.remainingPercentage !== "number" || quota.remainingPercentage > 0) {
+    return null;
+  }
+
+  const resetAtMs = Date.parse(quota.resetAt);
+  if (!Number.isFinite(resetAtMs) || resetAtMs <= nowMs) return null;
+
+  const confidence = ["provider_confirmed", "estimated"].includes(quota.quotaConfidence)
+    ? quota.quotaConfidence
+    : "unknown";
+  const observedAt = Number.isFinite(Date.parse(quota.observedAt))
+    ? new Date(quota.observedAt).toISOString()
+    : null;
+
+  return {
+    state: "provider_usage_blocked",
+    retryAt: quota.resetAt,
+    confidence,
+    observedAt,
+    source: typeof quota.quotaSource === "string" ? quota.quotaSource : "unknown",
+  };
 }
 
 /**
@@ -292,7 +324,14 @@ export async function handleAntigravityQuotaError(connectionId, status, model, a
       // this pair on subsequent requests too, not just the current retry loop
       // (the chat handler does not persist modelLock_* for this path).
       const cached = quotaCache.get(connectionId) || {};
-      cached[model] = { remainingPercentage: 0, resetAt: new Date(blockedUntil).toISOString() };
+      cached[model] = {
+        remainingPercentage: 0,
+        resetAt: new Date(blockedUntil).toISOString(),
+        quotaStatus: "blocked_by_strike",
+        quotaSource: "quota_strike_circuit_breaker",
+        quotaConfidence: "estimated",
+        observedAt: new Date(now).toISOString(),
+      };
       quotaCache.set(connectionId, cached);
       strikeBlocks.set(key, blockedUntil);
       return blockedUntil;
@@ -309,7 +348,15 @@ export async function handleAntigravityQuotaError(connectionId, status, model, a
 
   // Cache-block the requested model under its model name
   const cached = quotaCache.get(connectionId) || {};
-  cached[model] = { remainingPercentage: 0, resetAt: quota.resetAt };
+  cached[model] = {
+    ...quota,
+    remainingPercentage: 0,
+    resetAt: quota.resetAt,
+    quotaStatus: "reported",
+    quotaSource: quota.quotaSource || "antigravity_usage",
+    quotaConfidence: quota.quotaConfidence || "unknown",
+    observedAt: quota.observedAt || new Date().toISOString(),
+  };
   quotaCache.set(connectionId, cached);
 
   log.warn("AG_QUOTA", `${connectionId.slice(0, 8)} | UPSTREAM_${status} ${model} — quota exhausted; CACHE_BLOCK until ${quota.resetAt}`);

@@ -129,12 +129,10 @@ describe("HuggingFace image generation — end to end", () => {
   });
 
   it("surfaces an upstream error instead of a broken image", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 402,
-      text: async () => JSON.stringify({ error: "You have depleted your monthly included credits." }),
-      json: async () => ({ error: "You have depleted your monthly included credits." }),
-    });
+    global.fetch = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: "You have depleted your monthly included credits." }),
+      { status: 402, headers: { "content-type": "application/json" } },
+    ));
 
     const result = await generate({ prompt: "x" }, "black-forest-labs/FLUX.1-schnell");
 

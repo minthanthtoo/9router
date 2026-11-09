@@ -360,6 +360,8 @@ async function fetchWithTlsFallback(url, options, proxyUrl, forceFreshSocket = f
     const dispatcher = await getDispatcher(proxyUrl, false, forceFreshSocket);
     return await rawFetch(url, { ...options, dispatcher });
   } catch (err) {
+    // An image submission owns its retry decision and may already have been accepted.
+    if (options.disableRetries) throw err;
     const isStrictSsl = options.strictTls === true || process.env.STRICT_SSL === "true" || process.env.STRICT_SSL === "1";
     if (!isStrictSsl && isTlsCertError(err)) {
       if (!isBodyReplaySafe(options.body)) {

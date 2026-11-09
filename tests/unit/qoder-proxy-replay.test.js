@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+
+
 vi.mock("../../open-sse/services/qoderModels.js", () => ({
   getQoderModelConfig: vi.fn(async () => ({ key: "auto", max_output_tokens: 32 })),
   resolveQoderModels: vi.fn(),
@@ -29,8 +31,9 @@ async function loadExecutor(fetchMock, useProxy = true) {
     vi.stubEnv(key, "");
   }
   if (useProxy) vi.stubEnv("HTTPS_PROXY", "http://proxy.test:3128");
-  // Exercise the real proxyAwareFetch: it captures fetch when imported.
+  // Exercise real proxy selection with a mocked undici wire transport.
   vi.stubGlobal("fetch", fetchMock);
+  vi.doMock("undici", async () => ({ ...(await vi.importActual("undici")), fetch: fetchMock }));
   const { QoderExecutor } = await import("../../open-sse/executors/qoder.js");
   return new QoderExecutor();
 }
@@ -81,7 +84,7 @@ describe("Qoder signed inference transport", () => {
     expect(result.response.ok).toBe(true);
     await result.response.text();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(!!fetchMock.mock.calls[0][1].dispatcher).toBe(useProxy);
+    expect(fetchMock.mock.calls[0][1].dispatcher.constructor.name).toBe(useProxy ? "ProxyAgent" : "Agent");
   });
 
   it("preserves caller cancellation without replaying the request", async () => {

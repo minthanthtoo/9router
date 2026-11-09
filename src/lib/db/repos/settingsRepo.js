@@ -117,6 +117,26 @@ export async function updateSettings(updates) {
     const row = db.get(`SELECT data FROM settings WHERE id = 1`);
     const current = row ? parseJson(row.data, {}) : {};
     next = { ...current, ...updates };
+    for (const key of ["claudeAutoPing", "codexAutoPing"]) {
+      const patch = updates[key];
+      if (!patch || typeof patch !== "object" || Array.isArray(patch)) continue;
+      const existing = current[key] || {};
+      next[key] = { ...existing, ...patch };
+      for (const mapKey of ["connections", "schedules"]) {
+        if (patch[mapKey] && typeof patch[mapKey] === "object" && !Array.isArray(patch[mapKey])) {
+          next[key][mapKey] = { ...(existing[mapKey] || {}), ...patch[mapKey] };
+        }
+      }
+    }
+    if (updates.providerStrategies && typeof updates.providerStrategies === "object") {
+      next.providerStrategies = { ...(current.providerStrategies || {}), ...updates.providerStrategies };
+      for (const [provider, value] of Object.entries(updates.providerStrategies)) {
+        next.providerStrategies[provider] = { ...current.providerStrategies?.[provider], ...value };
+      }
+      for (const [provider, existing] of Object.entries(current.providerStrategies || {})) {
+        if (existing.rotationSequence) next.providerStrategies[provider] = { ...next.providerStrategies[provider], rotationSequence: existing.rotationSequence };
+      }
+    }
     db.run(
       `INSERT INTO settings(id, data) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
       [stringifyJson(next)],

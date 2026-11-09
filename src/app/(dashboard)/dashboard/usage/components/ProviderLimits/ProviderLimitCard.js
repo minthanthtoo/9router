@@ -150,10 +150,12 @@ export default function ProviderLimitCard({
       {!loading && !error && !message && quotas?.length > 0 && (
         <div className="space-y-4">
           {quotas.map((quota, index) => {
-            // For Antigravity, use remainingPercentage if available, otherwise calculate
-            const percentage =
-              quota.remainingPercentage !== undefined
-                ? Math.round(((quota.total - quota.used) / quota.total) * 100)
+            // Antigravity's normalized quota fraction is not a request count.
+            const quotaStatus = quota.quotaStatus === "unknown" ? "unknown" : quota.quotaStatus;
+            const percentage = quotaStatus === "unknown"
+              ? null
+              : quota.remainingPercentage !== undefined
+                ? Math.round(quota.remainingPercentage)
                 : calculatePercentage(quota.used, quota.total);
             const unlimited = quota.total === 0 || quota.total === null;
 
@@ -167,6 +169,8 @@ export default function ProviderLimitCard({
                 unlimited={unlimited}
                 resetTime={quota.resetAt}
                 recurring={quota.recurring !== false}
+                displayUnit={quota.displayUnit}
+                quotaStatus={quotaStatus}
               />
             );
           })}

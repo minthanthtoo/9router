@@ -13,6 +13,10 @@ function defaultDir() {
 
 export function getDataDir() {
   const configured = process.env.DATA_DIR;
+  const isolatedBuild = process.env.AURIX_ISOLATED_BUILD === "1";
+  if (isolatedBuild && (!configured || !path.isAbsolute(configured))) {
+    throw new Error("Isolated builds require an absolute DATA_DIR");
+  }
   if (!configured) return defaultDir();
 
   // On Windows, ignore Unix-style absolute paths (e.g. /var/lib/...) that come
@@ -26,7 +30,7 @@ export function getDataDir() {
     fs.mkdirSync(configured, { recursive: true });
     return configured;
   } catch (e) {
-    if (e?.code === "EACCES" || e?.code === "EPERM") {
+    if (!isolatedBuild && (e?.code === "EACCES" || e?.code === "EPERM")) {
       console.warn(`[DATA_DIR] '${configured}' not writable → fallback ~/.${APP_NAME}`);
       return defaultDir();
     }

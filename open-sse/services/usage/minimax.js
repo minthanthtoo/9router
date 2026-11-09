@@ -44,9 +44,9 @@ function formatMiniMaxQuotaName(model) {
 function getMiniMaxProvidedPercent(model, snakeKey, camelKey) {
   if (!model || typeof model !== "object") return null;
   const raw = model[snakeKey] ?? model[camelKey];
-  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== "number" && !(typeof raw === "string" && raw.trim())) return null;
   const num = Number(raw);
-  if (!Number.isFinite(num)) return null;
+  if (!Number.isFinite(num) || num < 0 || num > 100) return null;
   return Math.max(0, Math.min(100, num));
 }
 
@@ -104,7 +104,9 @@ function addMiniMaxQuota(quotas, key, model, getTotal, countSnake, countCamel, p
   const providedPercent = getMiniMaxProvidedPercent(model, percentSnake, percentCamel);
   if (total <= 0 && providedPercent === null) return;
 
-  const count = Math.max(0, Number(getMiniMaxField(model, countSnake, countCamel)) || 0);
+  const rawCount = getMiniMaxField(model, countSnake, countCamel);
+  if (providedPercent === null && (!(typeof rawCount === "number" || typeof rawCount === "string" && rawCount.trim()) || !Number.isFinite(Number(rawCount)))) return;
+  const count = Math.max(0, Number(rawCount) || 0);
   let effectiveTotal = total;
   let effectiveCount = count;
   if (total <= 0) {

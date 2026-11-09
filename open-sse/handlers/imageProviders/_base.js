@@ -29,3 +29,30 @@ export async function urlToBase64(url) {
 export function nowSec() {
   return Math.floor(Date.now() / 1000);
 }
+
+export function isUsableBase64Image(value) {
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().replace(/\s/g, "");
+  if (!normalized || !/^[A-Za-z0-9+/_-]+={0,2}$/.test(normalized) || normalized.length % 4 === 1) {
+    return false;
+  }
+  try {
+    return Buffer.from(normalized, "base64").length > 0;
+  } catch {
+    return false;
+  }
+}
+
+export function hasUsableImagePayload(result) {
+  if (!Array.isArray(result?.data)) return false;
+  return result.data.some((item) => {
+    if (isUsableBase64Image(item?.b64_json)) return true;
+    if (typeof item?.url !== "string") return false;
+    try {
+      const url = new URL(item.url);
+      return url.protocol === "http:" || url.protocol === "https:";
+    } catch {
+      return false;
+    }
+  });
+}

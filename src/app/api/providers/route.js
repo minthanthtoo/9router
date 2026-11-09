@@ -10,6 +10,7 @@ import { APIKEY_PROVIDERS } from "@/shared/constants/config";
 import { AI_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEmbeddingProvider } from "@/shared/constants/providers";
 import { normalizeProviderId, normalizeProviderSpecificData } from "@/lib/providerNormalization";
 import { toProviderConnectionResponse } from "@/lib/providerConnectionResponse";
+import { normalizeGeminiProjectId } from "@/lib/geminiProjectId";
 
 export const dynamic = "force-dynamic";
 
@@ -127,6 +128,19 @@ export async function POST(request) {
     }
 
     let providerSpecificData = normalizeProviderSpecificData(provider, body, body.providerSpecificData);
+
+    if (provider === "gemini") {
+      const projectId = normalizeGeminiProjectId(
+        providerSpecificData?.googleCloudProjectId || providerSpecificData?.projectId,
+      );
+      if (!projectId) {
+        return NextResponse.json({
+          error: "A valid Google Cloud project ID or project number is required for Gemini API credentials",
+          code: "GEMINI_PROJECT_ID_REQUIRED",
+        }, { status: 400 });
+      }
+      providerSpecificData = { ...(providerSpecificData || {}), googleCloudProjectId: projectId };
+    }
 
     // Compatible LLM nodes support multiple API-key connections (key pool); runtime
     // rotates/fails over via getProviderCredentials. Embedding nodes stay single-connection.

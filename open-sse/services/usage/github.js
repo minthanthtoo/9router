@@ -68,12 +68,14 @@ export async function getGitHubUsage(accessToken, providerSpecificData, proxyOpt
         quotas: {
           chat: {
             used: usedQuotas.chat || 0,
+            quotaStatus: usedQuotas.chat == null ? "unknown" : "reported",
             total: monthlyQuotas.chat || 0,
             unlimited: false,
             resetAt,
           },
           completions: {
             used: usedQuotas.completions || 0,
+            quotaStatus: usedQuotas.completions == null ? "unknown" : "reported",
             total: monthlyQuotas.completions || 0,
             unlimited: false,
             resetAt,

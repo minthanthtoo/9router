@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import PropTypes from "prop-types";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -44,6 +44,7 @@ export default function Sidebar({ onClose }) {
   const [mediaOpen, setMediaOpen] = useState(false);
   const [isDisconnected, setIsDisconnected] = useState(false);
   const [updateInfo, setUpdateInfo] = useState(null);
+  const [updateStatus, setUpdateStatus] = useState("");
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [shutdownCountdown, setShutdownCountdown] = useState(0);
@@ -58,16 +59,25 @@ export default function Sidebar({ onClose }) {
     });
   }, []);
 
-  // Lazy check for new npm version in background after initial render
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      fetch("/api/version")
-        .then(res => res.json())
-        .then(data => { if (data.hasUpdate) setUpdateInfo(data); })
-        .catch(() => {});
-    }, 2500);
-    return () => clearTimeout(timer);
+  const checkUpdates = useCallback(async () => {
+    setUpdateStatus("Checking…");
+    try {
+      const response = await fetch("/api/version", { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || !data.latestVersion) throw new Error("Version lookup unavailable");
+      setUpdateInfo(data.hasUpdate ? data : null);
+      setUpdateStatus(data.hasUpdate ? "" : "Up to date");
+      try { localStorage.setItem("9router.updateNotice", JSON.stringify(data)); } catch {}
+    } catch { setUpdateStatus("Check unavailable"); }
   }, []);
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("9router.updateNotice") || "null");
+      if (saved?.hasUpdate && saved.currentVersion === APP_CONFIG.version && /^\d+\.\d+\.\d+/.test(saved.latestVersion)) setUpdateInfo(saved);
+    } catch {}
+    const timer = setTimeout(checkUpdates, 2500);
+    return () => clearTimeout(timer);
+  }, [checkUpdates]);
 
   const isActive = (href) => {
     if (href === "/dashboard/endpoint") {
@@ -131,6 +141,7 @@ export default function Sidebar({ onClose }) {
               <span className="text-xs text-text-muted">v{APP_CONFIG.version}</span>
             </div>
           </Link>
+          <button type="button" onClick={checkUpdates} disabled={updateStatus === "Checking…"} className="self-start text-[11px] text-text-muted hover:text-text-main" title="Read the latest version; does not install or restart">{updateStatus || "Check updates"}</button>
           {updateInfo && (
             <div className="flex flex-col gap-1.5 rounded p-1 -m-1">
               <span className="text-xs font-semibold text-green-600 dark:text-amber-500">

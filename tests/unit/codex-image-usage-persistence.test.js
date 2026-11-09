@@ -7,6 +7,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../../src/sse/services/auth.js", () => ({
+  admitImageQuotaRequest: vi.fn(async () => ({ allowed: true })),
+  finishImageQuotaRecovery: vi.fn(),
+  getImageQuotaPoolAvailability: vi.fn(),
+  recordImageQuotaBlock: vi.fn(),
   getProviderCredentials: async () => ({
     accessToken: "provider-token",
     connectionId: "connection-a",
@@ -58,6 +62,11 @@ vi.mock("@/lib/usageDb.js", () => ({
   saveRequestUsage: mocks.saveRequestUsage,
 }));
 
+vi.mock("../../src/sse/services/keyAccess.js", () => ({
+  getKeyAccessContext: vi.fn(async () => ({})),
+  enforceKeyAccess: vi.fn(async () => null),
+}));
+
 import { handleImageGeneration } from "../../src/sse/handlers/imageGeneration.js";
 
 describe("Codex image usage persistence", () => {
@@ -80,12 +89,14 @@ describe("Codex image usage persistence", () => {
       return { success: true, response: Response.json({ data: [{ b64_json: "image" }] }) };
     });
 
-    await handleImageGeneration(new Request("http://localhost/v1/images/generations", {
+    const response = await handleImageGeneration(new Request("http://localhost/v1/images/generations", {
       method: "POST",
       headers: { Authorization: "Bearer client-key" },
       body: JSON.stringify({ model: "cx/gpt-6-sol-image", prompt: "draw a cat" }),
     }));
 
+    expect(response.status).toBe(200);
+    expect(mocks.handleImageGenerationCore).toHaveBeenCalledTimes(1);
     expect(mocks.saveRequestUsage).toHaveBeenCalledTimes(1);
     expect(mocks.saveRequestUsage).toHaveBeenCalledWith({
       provider: "codex",
@@ -110,11 +121,37 @@ describe("Codex image usage persistence", () => {
       return { success: true, response: Response.json({ data: [{ b64_json: "image" }] }) };
     });
 
-    await handleImageGeneration(new Request("http://localhost/v1/images/generations", {
+    const response = await handleImageGeneration(new Request("http://localhost/v1/images/generations", {
       method: "POST",
       body: JSON.stringify({ model: "cx/gpt-6-sol-image", prompt: "draw a cat" }),
     }));
 
+    expect(response.status).toBe(200);
+    expect(mocks.handleImageGenerationCore).toHaveBeenCalledTimes(1);
     expect(mocks.saveRequestUsage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["rejects asynchronously", () => Promise.reject(new Error("usage store unavailable"))],
+    ["throws synchronously", () => { throw new Error("usage store unavailable"); }],
+  ])("delivers a validated image once when usage persistence %s", async (_failureMode, failPersistence) => {
+    mocks.saveRequestUsage.mockImplementationOnce(failPersistence);
+    const image = { b64_json: "completed-image" };
+    mocks.handleImageGenerationCore.mockImplementation(async ({ onUsage, onRequestSuccess }) => {
+      await onUsage?.({ prompt_tokens: 12, completion_tokens: 34, total_tokens: 46 });
+      await onRequestSuccess?.();
+      return { success: true, response: Response.json({ data: [image] }) };
+    });
+
+    const response = await handleImageGeneration(new Request("http://localhost/v1/images/generations", {
+      method: "POST",
+      headers: { Authorization: "Bearer client-key" },
+      body: JSON.stringify({ model: "cx/gpt-5.6-sol-image", prompt: "draw a cat" }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: [image] });
+    expect(mocks.handleImageGenerationCore).toHaveBeenCalledTimes(1);
+    expect(mocks.saveRequestUsage).toHaveBeenCalledTimes(1);
   });
 });

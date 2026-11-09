@@ -1,4 +1,5 @@
 export async function register() {
+  if (process.env.AURIX_ISOLATED_BUILD === "1") return;
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { initConsoleLogCapture } = await import("@/lib/consoleLogBuffer");
     initConsoleLogCapture();
@@ -10,5 +11,9 @@ export async function register() {
 
     const { startModelCatalogSync } = await import("@/lib/modelCatalog/sync.js");
     startModelCatalogSync();
+    if (process.env.NEXT_PHASE !== "phase-production-build" && process.env.NODE_ENV !== "test" && process.env.IMAGE_ADMIN_TEST_WORKER_ENABLED !== "false") {
+      const { startAdminImageTestWorker } = await import("@/sse/services/adminImageTestWorker");
+      startAdminImageTestWorker();
+    }
   }
 }

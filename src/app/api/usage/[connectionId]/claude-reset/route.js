@@ -1,3 +1,4 @@
+import { invalidateRotationSnapshot } from "@/lib/db/repos/providerRotationRepo.js";
 // Ensure proxyFetch is loaded to patch globalThis.fetch
 import "open-sse/index.js";
 
@@ -28,7 +29,10 @@ export async function POST(request, { params }) {
     };
 
     ({ connection } = await refreshAndUpdateCredentials(connection, false, proxyOptions));
-    const result = await consumeClaudeResetGrant(connection.accessToken, grantId, proxyOptions);
+    await invalidateRotationSnapshot(connection.id, true);
+    let result;
+    try { result = await consumeClaudeResetGrant(connection.accessToken, grantId, proxyOptions); }
+    finally { try { await invalidateRotationSnapshot(connection.id); } catch { console.warn("[Claude reset] Rotation snapshot remains unavailable"); } }
 
     if (result.ok) return Response.json(result);
     const status = result.status >= 400 && result.status < 500 ? result.status : 409;

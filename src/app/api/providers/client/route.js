@@ -1,5 +1,17 @@
+import { readTextModelPolicies } from '@/lib/db/repos/textModelPolicyRepo.js';
+import { rotationPool } from "@/sse/services/providerRotation.js";
+import { emptyRotation, validateRotation, evaluateRotation } from "@/shared/utils/rotationSequence.mjs";
+import { readRotationPolicy, readRotationSnapshots } from "@/lib/db/repos/providerRotationRepo.js";
+import { rotationPreviewInfo } from "@/shared/utils/rotationPreview.mjs";
 import { NextResponse } from "next/server";
-import { getProviderConnections } from "@/lib/localDb";
+import {getImageQuotaState} from "@/lib/db/repos/imageQuotaRepo.js";
+import {resolveImageRouting,resolveImageAccountPreference} from "@/shared/utils/imageRouting.mjs";
+import { getProviderConnections, getSettings } from "@/lib/localDb";
+import { configuredQuotaModels } from "@/lib/quotaModelCatalog.js";
+import { canonicalTextModel } from "@/shared/utils/textModelPermission.mjs";
+import { getModelUpstreamId, PROVIDER_ID_TO_ALIAS } from "open-sse/config/providerModels.js";
+import { getCustomModels } from "@/lib/db/repos/aliasRepo.js";
+import { accountMatchesQuotaModel, filterQuotaConnections, quotaCatalogCounts, QUOTA_MODEL_CATEGORIES, QUOTA_MODEL_ID } from "@/shared/utils/quotaModelCatalog.mjs";
 import { backfillCodexEmails } from "@/lib/oauth/providers";
 import { USAGE_APIKEY_PROVIDERS, USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
 
@@ -85,8 +97,10 @@ export async function GET(request) {
     const page = parsePositiveInt(searchParams.get("page"), 1);
     const pageSize = Math.min(parsePositiveInt(searchParams.get("pageSize"), DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE);
 
+    const includeImageAccounts = searchParams.get("includeImageAccounts") === "true";
     const allConnections = await getProviderConnections();
-    const eligibleConnections = allConnections.filter(isUsageEligible);
+    const eligibleConnections = allConnections.filter((connection) => isUsageEligible(connection)
+      || (includeImageAccounts && ["antigravity", "codex", "gemini"].includes(connection.provider)));
     const providerOptions = Array.from(new Set(eligibleConnections.map((conn) => conn.provider))).sort();
 
     const providerFilteredConnections = eligibleConnections.filter((conn) => (
@@ -99,15 +113,73 @@ export async function GET(request) {
       return true;
     });
 
-    const sortedConnections = sortConnections(accountFilteredConnections, sort);
+    const model = searchParams.get("model") || "";
+    const modelProvider = searchParams.get("model_provider") || "";
+    const category = searchParams.get("category") || "all";
+    if (model && !QUOTA_MODEL_ID.test(model) || modelProvider.length > 80 || !QUOTA_MODEL_CATEGORIES.some(item => item.value === category)) {
+      return NextResponse.json({ error: "Invalid model filter" }, { status: 400 });
+    }
+    const wantsCatalog = searchParams.get("includeCatalog") === "true";
+    let models = [];
+    if (wantsCatalog || model || category !== "all" || searchParams.get("rotationModel")) {
+      models = configuredQuotaModels(providerOptions.filter(id => provider === "all" || id === provider), await getCustomModels());
+    }
+    const matchingConnections = filterQuotaConnections(accountFilteredConnections, models, { model, modelProvider, category });
+    let sortedConnections = sortConnections(matchingConnections, sort);
+    let rotationSegments = null, rotationHints = {}, resetPrioritySummary = null;
+    if (searchParams.has("rotationPolicy")) {
+      const encoded = searchParams.get("rotationPolicy");
+      const rotationModel = searchParams.get("rotationModel") || "";
+      if (provider === "all" || encoded.length > 4096 || rotationModel.length > 256 || rotationModel && !QUOTA_MODEL_ID.test(rotationModel)) return NextResponse.json({error:"Invalid rotation preview"},{status:400});
+      let policy;
+      try { policy = validateRotation(JSON.parse(encoded), provider); } catch { return NextResponse.json({error:"Invalid rotation preview policy"},{status:400}); }
+      const snapshots = await readRotationSnapshots(sortedConnections);
+      const cleanModel = canonicalTextModel(provider, rotationModel);
+      const lockModel = getModelUpstreamId(PROVIDER_ID_TO_ALIAS[provider] || provider, cleanModel);
+      const image = models.some(item => item.provider === provider && item.id === cleanModel && item.kind === "image");
+      const imageStates=image&&['codex','antigravity','gemini'].includes(provider)?await getImageQuotaState(sortedConnections,provider,'image_generation',lockModel):null;
+      if(image)policy=resolveImageAccountPreference(resolveImageRouting(await getSettings(),provider,lockModel,'generate'),policy,provider);
+      const evaluation = policy.enabled || rotationModel ? rotationPool(sortedConnections, snapshots, policy, {provider,model:rotationModel,lockModel,imageStates,quotaAdmission:image,textPolicies:image?null:await readTextModelPolicies(sortedConnections)}) : evaluateRotation(sortedConnections, snapshots, policy, {provider,model:rotationModel});
+      resetPrioritySummary = rotationPreviewInfo(evaluation, snapshots, policy, {provider,model:rotationModel,now:Date.now()}).creditSummary;
+      rotationHints = Object.fromEntries(evaluation.ranked.filter(row => row.urgent).map(row => [row.connection.id,{expiresAt:row.expiry}]));
+      sortedConnections = [...evaluation.ranked.map(row => row.connection), ...evaluation.waiting.map(row => row.connection), ...(evaluation.blocked || []).map(row => row.connection)];
+      rotationSegments = evaluation.segments.map(segment => ({key:segment.key,ids:segment.rows.map(row=>row.connection.id),boundaries:segment.boundaries,rotationName:segment.key.startsWith("reset")?"Expiring credit":"Rotation segment"}));
+      if (evaluation.waiting.length) rotationSegments.push({key:"waiting", ids:evaluation.waiting.map(row=>row.connection.id), boundaries:[], rotationName:"Waiting"});
+      if (evaluation.blocked?.length) rotationSegments.push({key:"unavailable", ids:evaluation.blocked.map(row=>row.connection.id), boundaries:[], rotationName:"Not eligible"});
+    }
+    if (searchParams.has("resetPriority") && !searchParams.has("rotationPolicy")) {
+      const encoded = searchParams.get("resetPriority");
+      let policy;
+      try {
+        if (encoded.length > 1024) throw new TypeError();
+        policy = validateRotation({...emptyRotation(),enabled:true,resetPriority:JSON.parse(encoded)},'codex');
+      } catch { return NextResponse.json({error:"Invalid reset priority"},{status:400}); }
+      const codex = sortedConnections.filter(connection => connection.provider === 'codex');
+      const snapshots = await readRotationSnapshots(codex), now = Date.now();
+      const evaluation = rotationPool(codex,snapshots,policy,{provider:'codex',model,now});
+      resetPrioritySummary = rotationPreviewInfo(evaluation,snapshots,policy,{provider:'codex',model,now}).creditSummary;
+      const urgent = evaluation.ranked.filter(row => row.urgent);
+      rotationHints = Object.fromEntries(urgent.map(row => [row.connection.id,{expiresAt:row.expiry}]));
+      // Promote across the entire result before pagination; local card sorts stay inside this group.
+      sortedConnections = [...urgent.map(row => row.connection),...sortedConnections.filter(connection => !rotationHints[connection.id])];
+    }
+    if (resetPrioritySummary) {
+      const {policy:saved} = await readRotationPolicy('codex');
+      const requested = searchParams.has('rotationPolicy') ? JSON.parse(searchParams.get('rotationPolicy')).resetPriority : JSON.parse(searchParams.get('resetPriority'));
+      resetPrioritySummary.live = saved.enabled && saved.resetPriority.enabled && saved.resetPriority.days === requested.days && saved.resetPriority.weeklyBelow === requested.weeklyBelow;
+    }
     const total = sortedConnections.length;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const currentPage = Math.min(page, totalPages);
     const offset = (currentPage - 1) * pageSize;
-    const pageConnections = sortedConnections.slice(offset, offset + pageSize).map(sanitize);
+    const pageConnections = sortedConnections.slice(offset, offset + pageSize).map(connection => ({...sanitize(connection),...(wantsCatalog ? {displayModels: models.filter(item => accountMatchesQuotaModel(connection,item))} : {}),...(rotationHints[connection.id]?{rotationHint:rotationHints[connection.id]}:{})}));
 
     return NextResponse.json({
       connections: pageConnections,
+      rotationSegments,
+      resetPrioritySummary,
+      ...(wantsCatalog ? { modelCatalog: quotaCatalogCounts(accountFilteredConnections, models, category), catalogObservedAt: new Date().toISOString(), supportScope: "configured_catalog_not_confirmed_access" } : {}),
+      scope: { provider, accountStatus, model, modelProvider, category },
       providerOptions,
       pagination: {
         page: currentPage,
@@ -119,7 +191,7 @@ export async function GET(request) {
         eligibleConnections: eligibleConnections.length,
         providerFilteredConnections: providerFilteredConnections.length,
       },
-    });
+    }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.log("Error fetching providers for client:", error);
     return NextResponse.json({ error: "Failed to fetch providers" }, { status: 500 });

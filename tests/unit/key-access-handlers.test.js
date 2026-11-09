@@ -104,6 +104,102 @@ const chat = (model, k) => handleChat(post("/v1/chat/completions", { model, stre
 describe("chat (/v1/chat/completions, /v1/messages, /v1/responses all use handleChat)", () => {
   beforeEach(() => mocks.getProviderCredentials.mockResolvedValue({ connectionId: "conn", connectionName: "mock" }));
 
+  it.each([
+    ["tool declaration", { tools: [{ type: "image_generation" }] }],
+    ["forced tool choice", { tool_choice: { type: "image_generation" } }],
+    ["image output modality", { modalities: ["text", "image"] }],
+    ["Gemini image output modality", { generationConfig: { responseModalities: ["IMAGE"] } }],
+  ])("rejects unmanaged native image generation via %s before provider access", async (_name, fields) => {
+    const response = await handleChat(post("/v1/responses", {
+      model: "openai/model-b",
+      input: [{ role: "user", content: "draw a house" }],
+      ...fields,
+    }, "sk-open"));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: "image_generation_requires_managed_route" },
+    });
+    expect(mocks.getProviderCredentials).not.toHaveBeenCalled();
+    expect(mocks.handleChatCore).not.toHaveBeenCalled();
+  });
+
+  it("keeps an ordinary function tool with the same name available", async () => {
+    const response = await handleChat(post("/v1/chat/completions", {
+      model: "openai/model-b",
+      messages: [{ role: "user", content: "draw a house" }],
+      tools: [{ type: "function", function: { name: "image_generation", parameters: {} } }],
+    }, "sk-open"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.getProviderCredentials).toHaveBeenCalled();
+    expect(mocks.handleChatCore).toHaveBeenCalled();
+  });
+
+  it("keeps image-input vision chat available when output is text", async () => {
+    const response = await handleChat(post("/v1/chat/completions", {
+      model: "openai/gpt-4o", modalities: ["text"],
+      messages: [{ role: "user", content: [
+        { type: "text", text: "Describe this image" },
+        { type: "image_url", image_url: { url: "data:image/png;base64,aGVsbG8=" } },
+      ] }],
+    }, "sk-open"));
+    expect(response.status).toBe(200);
+    expect(mocks.getProviderCredentials).toHaveBeenCalled();
+    expect(mocks.handleChatCore).toHaveBeenCalled();
+  });
+
+  it.each([
+    ["/v1/chat/completions", "ag/gemini-3.1-flash-image"],
+    ["/v1/chat/completions", "gemini/gemini-3.1-flash-image"],
+    ["/v1/chat/completions", "cx/gpt-image-2.5"],
+    ["/v1/chat/completions", "openai/gpt-image-2.5"],
+    ["/v1/responses", "ag/gemini-3.1-flash-image"],
+    ["/v1/responses", "gemini/gemini-3.1-flash-image"],
+    ["/v1/responses", "cx/gpt-image-2.5"],
+    ["/v1/responses", "openai/gpt-image-2.5"],
+  ])("requires the managed Images route for %s image-output model %s", async (path, model) => {
+    const body = path === "/v1/responses"
+      ? { model, input: [{ role: "user", content: "draw a house" }] }
+      : { model, messages: [{ role: "user", content: "draw a house" }] };
+    const response = await handleChat(post(path, body, "sk-open"));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: "image_generation_requires_managed_route" },
+    });
+    expect(mocks.getProviderCredentials).not.toHaveBeenCalled();
+    expect(mocks.handleChatCore).not.toHaveBeenCalled();
+  });
+
+  it("blocks image-output models through Gemini-native generateContent before credential lookup", async () => {
+    const response = await geminiRoute.POST(
+      new Request("http://localhost/v1beta/models/gemini-3.1-flash-image:generateContent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": "sk-open" },
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "draw a house" }] }] }),
+      }),
+      { params: Promise.resolve({ path: ["gemini-3.1-flash-image:generateContent"] }) },
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: "image_generation_requires_managed_route" },
+    });
+    expect(mocks.getProviderCredentials).not.toHaveBeenCalled();
+    expect(mocks.handleChatCore).not.toHaveBeenCalled();
+  });
+
+  it("preserves restricted-key denial on the Gemini-native image-output rejection path", async () => {
+    const response = await geminiRoute.POST(post("/v1beta/models/gemini-3.1-flash-image:generateContent", {
+      contents: [{ role: "user", parts: [{ text: "draw a house" }] }],
+      generationConfig: { responseModalities: ["AUDIO", "IMAGE"] },
+    }, "sk-empty"), { params: Promise.resolve({ path: ["gemini-3.1-flash-image:generateContent"] }) });
+    expect(response.status).toBe(403);
+    expect(mocks.getProviderCredentials).not.toHaveBeenCalled();
+    expect(mocks.handleChatCore).not.toHaveBeenCalled();
+  });
+
   it("unrestricted key reaches the provider for the combo and models", async () => {
     for (const m of ["Main", "openai/model-b"]) {
       expect((await chat(m, "sk-open")).status).toBe(200);

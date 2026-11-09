@@ -31,6 +31,8 @@ function toFormState(schedule, reactive) {
 export default function AutoPingScheduleModal({ isOpen, onClose, onSave, connection, reactive = false, schedule = null }) {
   // Mounted only while the modal is open, so the initial state is always fresh.
   const [form, setForm] = useState(() => toFormState(schedule, reactive));
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const windowHours = Number(form.windowHours);
   const slotsPerDay = Number(form.slotsPerDay);
@@ -56,37 +58,46 @@ export default function AutoPingScheduleModal({ isOpen, onClose, onSave, connect
 
   const update = (patch) => setForm((prev) => ({ ...prev, ...patch }));
 
-  const handleSave = () => {
-    if (!canSave) return;
-    onSave({
-      reactive: form.mode === "reset",
-      schedule: form.mode === "schedule"
-        ? {
-          enabled: true,
-          anchor: form.anchor,
-          timezone: form.timezone,
-          windowHours,
-          slotsPerDay,
-        }
-        : { enabled: false },
-    });
-    onClose();
+  const handleSave = async () => {
+    if (!canSave || saving) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      await onSave({
+        reactive: form.mode === "reset",
+        schedule: form.mode === "schedule"
+          ? {
+            enabled: true,
+            anchor: form.anchor,
+            timezone: form.timezone,
+            windowHours,
+            slotsPerDay,
+          }
+          : { enabled: false },
+      });
+      onClose();
+    } catch (error) {
+      setSaveError(error?.message || "Could not save automatic quota checks. Try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => { if (!saving) onClose(); }}
       title="Auto-ping settings"
       size="lg"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} disabled={!canSave}>Save</Button>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSave} disabled={!canSave || saving}>{saving ? "Saving…" : "Save"}</Button>
         </>
       }
     >
       <div className="flex flex-col gap-4">
+        {saveError && <p role="alert" className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{saveError}</p>}
         <p className="text-sm text-text-muted">
           Configure automated quota pings{connection?.name ? ` for ${connection.name}` : ""} — pick one mode.
         </p>

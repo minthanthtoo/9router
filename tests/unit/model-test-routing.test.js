@@ -41,10 +41,12 @@ describe("model test route kind routing", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     global.fetch = originalFetch;
   });
 
   it("routes image model tests to /api/v1/images/generations", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(new AbortController().signal);
     const { POST } = await import("../../src/app/api/models/test/route.js");
 
     const req = new Request("http://localhost/api/models/test", {
@@ -60,10 +62,13 @@ describe("model test route kind routing", () => {
     const body = await res.json();
 
     expect(body.ok).toBe(true);
+    expect(timeoutSpy).toHaveBeenCalledWith(90_000);
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining("/api/v1/images/generations"),
       expect.objectContaining({
         method: "POST",
+        headers: expect.objectContaining({ "X-Hualogu-Image-Call-Type": "admin_model_sample" }),
+        signal: expect.any(AbortSignal),
         body: JSON.stringify({
           model: "hf/black-forest-labs/FLUX.1-schnell",
           prompt: "test",

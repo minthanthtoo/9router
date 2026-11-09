@@ -44,7 +44,7 @@ describe("AUDIT-002: API key masking", () => {
 
     // The byApiKey stats entries should use apiKeyMasked, not raw apiKey
     // Check the daily summary path
-    const dailyPath = source.match(/stats\.byApiKey\[akKey\] = \{[^}]*apiKeyMasked[^}]*\}/);
+    const dailyPath = source.match(/stats\.byApiKey\[statsKey\] = \{[^}]*apiKeyMasked[^}]*\}/);
     expect(dailyPath).not.toBeNull();
     // Check the 24h live path
     const livePath = source.match(/stats\.byApiKey\[akKey\] = \{[^}]*apiKeyMasked[^}]*\}/g);
@@ -57,7 +57,7 @@ describe("AUDIT-002: API key masking", () => {
       path.resolve(REPO_ROOT, "src/lib/db/repos/usageRepo.js"),
       "utf-8"
     );
-    // The 24h path should use apiKeyMasked in the akKey template
+    // The 24h path should use apiKeyMasked in the stats key template
     expect(source).toContain("${apiKeyMasked}|${r.model}|${r.provider");
     // Should NOT use raw r.apiKey in the key
     expect(source).not.toContain("${r.apiKey}|${r.model}|${r.provider");

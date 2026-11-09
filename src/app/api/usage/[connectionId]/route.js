@@ -3,6 +3,9 @@ import "open-sse/index.js";
 
 import { getProviderConnectionById, updateProviderConnection } from "@/lib/localDb";
 import { getUsageForProvider } from "open-sse/services/usage.js";
+import { recordRotationUsage } from "@/lib/db/repos/providerRotationRepo.js";
+import { imageUsageEvidence } from "open-sse/services/usage/imageEvidence.js";
+import { recordImageProviderUsageEvidence } from "@/lib/db/repos/connectionsRepo.js";
 import { isUnrecoverableRefreshError } from "open-sse/services/tokenRefresh.js";
 import { getExecutor } from "open-sse/executors/index.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
@@ -152,7 +155,8 @@ export async function GET(request, { params }) {
     const isApikeyEligible =
       isApikeyAuth && USAGE_APIKEY_PROVIDERS.includes(connection.provider);
 
-    if (!isOAuth && !isApikeyEligible) {
+    const isCodexAccessToken = connection.provider === "codex" && connection.authType === "access_token";
+    if (!isOAuth && !isApikeyEligible && !isCodexAccessToken) {
       return Response.json({ message: "Usage not available for this connection" });
     }
 
@@ -179,6 +183,7 @@ export async function GET(request, { params }) {
       }
     }
 
+    const rotationReadStartedAt = Date.now();
     // Fetch usage from provider API
     let usage = await getUsageForProvider(connection, proxyOptions, { force });
 
@@ -194,6 +199,13 @@ export async function GET(request, { params }) {
       }
     }
 
+    const evidence = imageUsageEvidence(connection.provider, usage);
+    if (evidence) {
+      try { await recordImageProviderUsageEvidence(connection, evidence); }
+      catch { console.warn("[Usage] Image quota evidence could not be saved"); }
+    }
+    try { await recordRotationUsage(connection, usage, rotationReadStartedAt); }
+    catch { console.warn("[Usage] Rotation snapshot could not be saved"); }
     return Response.json(usage);
   } catch (error) {
     const provider = connection?.provider ?? "unknown";

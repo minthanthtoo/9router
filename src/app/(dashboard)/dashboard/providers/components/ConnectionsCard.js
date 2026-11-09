@@ -1,5 +1,6 @@
 "use client";
 
+import RotationSequenceControl from "@/shared/components/RotationSequenceControl";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getStatusVariant as getConnectionStatusVariant } from "@/shared/utils/connectionStatus";
 import PropTypes from "prop-types";
@@ -333,7 +334,8 @@ export default function ConnectionsCard({ providerId, isOAuth, loginProviderId =
       const res = await fetch("/api/settings", { cache: "no-store" });
       const data = res.ok ? await res.json() : {};
       const current = data.providerStrategies || {};
-      const override = {};
+      const override = { ...(current[providerId] || {}) };
+      override.fallbackStrategy = null; override.stickyRoundRobinLimit = null;
       if (strategy) override.fallbackStrategy = strategy;
       if (strategy === "round-robin" && stickyLimit !== "") override.stickyRoundRobinLimit = Number(stickyLimit) || 3;
       const updated = { ...current };
@@ -405,6 +407,7 @@ export default function ConnectionsCard({ providerId, isOAuth, loginProviderId =
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
           <h2 className="text-lg font-semibold">Connections</h2>
           <div className="flex flex-wrap items-center gap-2">
+            <RotationSequenceControl provider={providerId} />
             <span className="text-xs text-text-muted font-medium">Round Robin</span>
             <Toggle
               checked={providerStrategy === "round-robin"}

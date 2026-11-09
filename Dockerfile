@@ -19,9 +19,9 @@ ARG NPM_REGISTRY
 
 RUN apk add --no-cache python3 make g++ linux-headers
 
-COPY package.json ./
+COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
-    npm install \
+    npm ci \
       --registry="${NPM_REGISTRY}" \
       --fetch-retries=5 \
       --fetch-retry-factor=2 \
@@ -31,25 +31,23 @@ RUN --mount=type=cache,target=/root/.npm \
 
 COPY . ./
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+RUN NODE_OPTIONS=--max-old-space-size=768 npm run build
 
 # https://github.com/decolua/9router/issues/5245
 # wreq-js and playwright-core are lazy runtime dependencies (loaded by
 # lazyRuntime.js via createRequire). Next standalone tracing does not include
 # them, so OpenCode Free fails with HTTP 502 ("resolve is undefined").
-# Install them (with their native bindings/transitive deps) in an isolated dir
-# so the runner stage can copy them into /app/node_modules.
+# Keep this separately locked graph so runtime loading does not depend on
+# Next tracing or a fresh unpinned install.
+COPY docker/lazy-runtime/package.json docker/lazy-runtime/package-lock.json /opt/lazy-runtime/
 RUN --mount=type=cache,target=/root/.npm \
-    mkdir -p /opt/lazy-runtime && cd /opt/lazy-runtime && \
-    npm init -y >/dev/null && \
-    npm install --no-save \
+    npm ci --prefix /opt/lazy-runtime \
       --registry="${NPM_REGISTRY}" \
       --fetch-retries=5 \
       --fetch-retry-factor=2 \
       --fetch-retry-mintimeout=10000 \
       --fetch-retry-maxtimeout=120000 \
-      --fetch-timeout=300000 \
-      wreq-js playwright-core
+      --fetch-timeout=300000
 
 FROM ${NODE_IMAGE} AS runner
 ARG ALPINE_MIRROR
@@ -74,6 +72,7 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/custom-server.js ./custom-server.js
 COPY --from=builder /app/open-sse ./open-sse
+COPY --from=builder /app/tools ./tools
 # Next file tracing can omit sibling files; MITM runs server.js as a separate process.
 COPY --from=builder /app/src/mitm ./src/mitm
 # Standalone node_modules may omit deps only required by the MITM child process.
@@ -89,14 +88,15 @@ COPY --from=builder /app/node_modules/node-machine-id ./node_modules/node-machin
 # tracing. See https://github.com/decolua/9router/issues/5245
 COPY --from=builder /opt/lazy-runtime/node_modules/. ./node_modules/
 
-RUN mkdir -p /app/data && chown -R node:node /app && \
+RUN chmod +x /app/tools/provider-migration-entrypoint.sh && \
+  mkdir -p /app/data && chown -R node:node /app && \
   mkdir -p /app/data-home && chown node:node /app/data-home && \
   ln -sf /app/data-home /root/.9router 2>/dev/null || true
 
-# Avoid a full distribution upgrade in the runtime image. It makes builds less
-# reproducible and is unrelated to installing the runtime entrypoint helper.
-RUN apk add --no-cache su-exec ffmpeg && \
-  printf '#!/bin/sh\nchown -R node:node /app/data /app/data-home 2>/dev/null\nexec su-exec node "$@"\n' > /entrypoint.sh && \
+# Avoid a full distribution upgrade in the runtime image. Keep the upstream
+# runtime package installation and add bash for the optional migration hook.
+RUN apk add --no-cache su-exec bash ffmpeg && \
+  printf '#!/bin/sh\nchown -R node:node /app/data /app/data-home 2>/dev/null\nif [ -n "${PROVIDER_MIGRATION_BUNDLE:-}" ]; then\n  exec /bin/bash /app/tools/provider-migration-entrypoint.sh "$@"\nfi\nexec su-exec node "$@"\n' > /entrypoint.sh && \
   chmod +x /entrypoint.sh
 
 EXPOSE 20128

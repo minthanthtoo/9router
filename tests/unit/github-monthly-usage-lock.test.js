@@ -84,3 +84,24 @@ describe("GitHub monthly usage exhaustion", () => {
     }
   });
 });
+
+describe("Codex unsupported-model fallback", () => {
+  it("keeps the same-request account fallback without persisting a 30-minute model lock", async () => {
+    dbMocks.getProviderConnections.mockResolvedValue([{
+      id: "codex-a",
+      provider: "codex",
+      name: "codex-a",
+    }]);
+
+    const result = await markAccountUnavailable(
+      "codex-a",
+      400,
+      "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.",
+      "codex",
+      "gpt-image-2.5",
+    );
+
+    expect(result).toEqual({ shouldFallback: true, cooldownMs: 0 });
+    expect(dbMocks.updateProviderConnection).not.toHaveBeenCalled();
+  });
+});

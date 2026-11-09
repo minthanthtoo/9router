@@ -14,6 +14,7 @@ import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
+import RotationSequenceControl from "@/shared/components/RotationSequenceControl";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
@@ -388,7 +389,8 @@ export default function ProviderDetailPage() {
       const current = settingsData.providerStrategies || {};
 
       // Build override: null strategy means remove override, use global
-      const override = {};
+      const override = { ...(current[providerId] || {}) };
+      override.fallbackStrategy = null; override.stickyRoundRobinLimit = null;
       if (strategy) override.fallbackStrategy = strategy;
       if (strategy === "round-robin" && stickyLimit !== "") {
         override.stickyRoundRobinLimit = Number(stickyLimit) || 3;
@@ -450,29 +452,36 @@ export default function ProviderDetailPage() {
     saveThinkingConfig(mode);
   };
 
-  const saveAutoPing = async (next) => {
+  const saveAutoPing = async (connectionId, { reactive, schedule }) => {
     const autoPingSettingsKey = AUTO_PING_SETTINGS_KEYS[providerId];
     if (!autoPingSettingsKey) return;
 
-    setAutoPing(next);
-    try {
-      await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [autoPingSettingsKey]: next }),
-      });
-    } catch (error) {
-      console.log("Error saving auto-ping config:", error);
-    }
-  };
-
-  const handleSaveAutoPing = (connectionId, { reactive, schedule }) => {
-    saveAutoPing({
+    const previous = autoPing;
+    const next = {
       ...autoPing,
       connections: { ...autoPing.connections, [connectionId]: reactive },
       schedules: { ...autoPing.schedules, [connectionId]: schedule },
-    });
+    };
+    setAutoPing(next);
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [autoPingSettingsKey]: {
+          connections: { [connectionId]: reactive },
+          schedules: { [connectionId]: schedule },
+        } }),
+      });
+      if (!response.ok) throw new Error("Failed to save automatic quota checks");
+      const saved = await response.json();
+      setAutoPing(saved[autoPingSettingsKey] || next);
+    } catch (error) {
+      setAutoPing(previous);
+      throw error;
+    }
   };
+
+  const handleSaveAutoPing = (connectionId, result) => saveAutoPing(connectionId, result);
 
   useEffect(() => {
     fetchConnections();
@@ -1574,6 +1583,7 @@ export default function ProviderDetailPage() {
                   )}
                 </>
               )}
+              <RotationSequenceControl provider={providerId} />
               {/* Round Robin toggle */}
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-text-muted font-medium">Round Robin</span>

@@ -1,0 +1,6 @@
+@keyframes enter {
+  from { opacity: 0; transform: translateY(6px) rotateX(-3deg); }
+  to { opacity: 1; transform: translateY(0) rotateX(0); }
+}
+.enter { animation: enter 220ms ease-out both; transform-origin: top center; }
+@media (prefers-reduced-motion: reduce) { .enter { animation: none; } }

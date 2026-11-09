@@ -31,10 +31,12 @@ afterAll(() => {
 describe("DB Concurrency — atomic safety", () => {
   it("100 parallel saveRequestUsage → no count loss", async () => {
     const N = 100;
+    // Model distinct requests; identical timestamp/token tuples are deduplicated.
+    const startedAt = Date.now() - N;
     const promises = [];
     for (let i = 0; i < N; i++) {
       promises.push(db.saveRequestUsage({
-        timestamp: tsFor(i),
+        timestamp: new Date(startedAt + i).toISOString(),
         provider: "openai", model: "gpt-4", connectionId: "c1",
         tokens: { prompt_tokens: 10, completion_tokens: 5 },
         endpoint: "/v1/chat", status: "ok",
@@ -73,10 +75,11 @@ describe("DB Concurrency — atomic safety", () => {
   }, 15000);
 
   it("mixed concurrent: usage + details + connections + aliases", async () => {
+    const startedAt = Date.now() - 50;
     const ops = [];
     for (let i = 0; i < 50; i++) {
       ops.push(db.saveRequestUsage({
-        timestamp: tsFor(1000 + i),
+        timestamp: new Date(startedAt + i).toISOString(),
         provider: "anthropic", model: `m-${i % 3}`, connectionId: "c2",
         tokens: { prompt_tokens: 20 }, status: "ok",
       }));
@@ -106,6 +109,33 @@ describe("DB Concurrency — atomic safety", () => {
     const s = await db.getSettings();
     for (let i = 0; i < N; i++) {
       expect(s[`field${i}`]).toBe(`v${i}`); // all updates preserved
+    }
+  });
+
+  it("parallel auto-ping edits preserve each connection schedule", async () => {
+    const N = 24;
+    await db.updateSettings({
+      codexAutoPing: {
+        connections: { existing: true },
+        schedules: { existing: { enabled: true, anchor: "09:30" } },
+      },
+    });
+    await Promise.all(Array.from({ length: N }, (_, i) => db.updateSettings({
+      codexAutoPing: {
+        connections: { [`codex-${i}`]: i % 2 === 0 },
+        schedules: { [`codex-${i}`]: { enabled: true, anchor: `${String(i).padStart(2, "0")}:00` } },
+      },
+    })));
+
+    const settings = await db.getSettings();
+    expect(settings.codexAutoPing.connections.existing).toBe(true);
+    expect(settings.codexAutoPing.schedules.existing).toEqual({ enabled: true, anchor: "09:30" });
+    for (let i = 0; i < N; i++) {
+      expect(settings.codexAutoPing.connections[`codex-${i}`]).toBe(i % 2 === 0);
+      expect(settings.codexAutoPing.schedules[`codex-${i}`]).toEqual({
+        enabled: true,
+        anchor: `${String(i).padStart(2, "0")}:00`,
+      });
     }
   });
 
@@ -158,10 +188,11 @@ describe("DB Concurrency — atomic safety", () => {
 
   it("daily summary aggregates correctly under parallel writes", async () => {
     const N = 50;
+    const startedAt = Date.now() - N;
     const promises = [];
     for (let i = 0; i < N; i++) {
       promises.push(db.saveRequestUsage({
-        timestamp: tsFor(2000 + i),
+        timestamp: new Date(startedAt + i).toISOString(),
         provider: "google", model: "gemini-pro", connectionId: "cG",
         tokens: { prompt_tokens: 100, completion_tokens: 50 },
         status: "ok",

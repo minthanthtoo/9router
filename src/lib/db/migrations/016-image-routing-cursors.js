@@ -1,0 +1,1 @@
+export default {version:16,name:'image-routing-cursors',up(db){db.exec('CREATE TABLE IF NOT EXISTS aurixImageRoutingCursors(scope TEXT PRIMARY KEY,connectionId TEXT NOT NULL,useCount INTEGER NOT NULL,updatedAt TEXT NOT NULL)');}};

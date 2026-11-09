@@ -12,6 +12,15 @@ cd tests/ && npm install
 
 ## Running Tests
 
+Default Vitest runs create a disposable data directory before loading application
+modules, so omitted `DATA_DIR` does not select the user's normal 9Router store.
+Each isolated test context owns and removes only its generated directory. An
+explicit `DATA_DIR` is preserved; callers are responsible for selecting a safe
+test database. `RUN_REAL=1` preserves the existing real-provider workflow and
+must be used only with separately authorized credentials, environment, and spend.
+This setup does not apply to arbitrary scripts or Node's built-in test runner;
+those commands still require explicit isolation when they use application data.
+
 From the `tests/` directory:
 
 ```bash

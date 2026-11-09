@@ -110,6 +110,10 @@ export const MODEL_PRICING = {
   "gemini-3.5-flash-lite":         { input: 0.30,  output: 2.50,  cached: 0.03,  reasoning: 3.75,   cache_creation: 0.375 },
   "gemini-3.5-flash-high":         { input: 0.50,  output: 3.00,  cached: 0.03,  reasoning: 4.50,   cache_creation: 0.50  },
   "gemini-3-flash-preview":        { input: 0.50,  output: 3.00,  cached: 0.03,  reasoning: 4.50,   cache_creation: 0.50  },
+  // Gemini 3.1 Flash Image standard tier: IMAGE output is $60/1M tokens;
+  // text and thinking output is $3/1M. If modality usage is absent, cost all
+  // candidate output at the image rate so the estimate does not understate it.
+  "gemini-3.1-flash-image":        { input: 0.50,  output: 3.00, image_output: 60.00, reasoning: 3.00 },
   "gemini-3-pro-preview":         { input: 2.00,  output: 12.00, cached: 0.25,  reasoning: 18.00,  cache_creation: 2.00  },
   "gemini-3.1-pro-low":           { input: 2.00,  output: 12.00, cached: 0.25,  reasoning: 18.00,  cache_creation: 2.00  },
   "gemini-3.1-pro-high":          { input: 4.00,  output: 18.00, cached: 0.50,  reasoning: 27.00,  cache_creation: 4.00  },
@@ -227,8 +231,6 @@ export const PROVIDER_PRICING = {
     "ex/gpt-5.4": { input: 2.5, output: 15.0, cached: 0.25, reasoning: 15.0 },
     "google/gemini-2.5-flash-image": { input: 0.3, output: 2.5, reasoning: 2.5 },
     "google/gemini-3-flash-preview": { input: 0.5, output: 3.0, cached: 0.05, cache_creation: 0.08333, reasoning: 3.0 },
-    "google/gemini-3-pro-image-preview": { input: 2, output: 12, reasoning: 12 },
-    "google/gemini-3.1-flash-image-preview": { input: 0.5, output: 3.0, reasoning: 3.0 },
     "google/gemini-3.1-flash-lite-image": { input: 0.25, output: 1.5, reasoning: 1.5 },
     "google/gemini-3.1-pro-preview": { input: 2, output: 12, cached: 0.2, cache_creation: 0.375, reasoning: 12 },
     "google/gemini-3.5-flash": { input: 1.5, output: 9.0, cached: 0.15, cache_creation: 0.08333, reasoning: 9.0 },
@@ -444,6 +446,13 @@ export function getPricingForModel(provider, model) {
   return null;
 }
 
+/** Preserve modality-specific defaults when an operator overrides other rates. */
+export function mergePricingOverride(defaultPricing, overridePricing) {
+  if (!overridePricing) return defaultPricing || null;
+  if (!defaultPricing) return overridePricing;
+  return { ...defaultPricing, ...overridePricing };
+}
+
 /**
  * Get all provider pricing (for UI / API).
  * Returns PROVIDER_PRICING — consumers should fall back to MODEL_PRICING for unlisted models.
@@ -487,7 +496,43 @@ export function calculateCostFromTokens(tokens, pricing) {
   }
 
   const outputTokens = tokens.completion_tokens || tokens.output_tokens || 0;
-  cost += outputTokens * (pricing.output / 1000000);
+  if (pricing.image_output !== undefined) {
+    const detailRows = tokens.completion_tokens_details;
+    let imageOutputTokens = null;
+    if (Array.isArray(detailRows)) {
+      const imageRows = detailRows.filter((row) => String(row?.modality || "").toUpperCase() === "IMAGE");
+      if (imageRows.length > 0) {
+        let totalImageTokens = 0;
+        let validImageCounts = true;
+        for (const row of imageRows) {
+          const count = row?.tokenCount ?? row?.token_count;
+          if (!Number.isSafeInteger(count) || count <= 0) {
+            validImageCounts = false;
+            break;
+          }
+          totalImageTokens += count;
+          if (!Number.isSafeInteger(totalImageTokens)) {
+            validImageCounts = false;
+            break;
+          }
+        }
+        if (validImageCounts) imageOutputTokens = totalImageTokens;
+      }
+    }
+
+    if (imageOutputTokens === null) {
+      // Gemini can omit candidatesTokensDetails. Conservatively treat the
+      // output as image tokens rather than applying the much lower text rate.
+      cost += outputTokens * (pricing.image_output / 1000000);
+    } else {
+      const billableImageTokens = Math.min(outputTokens, imageOutputTokens);
+      const textOutputTokens = Math.max(0, outputTokens - billableImageTokens);
+      cost += billableImageTokens * (pricing.image_output / 1000000);
+      cost += textOutputTokens * ((pricing.text_output ?? pricing.output) / 1000000);
+    }
+  } else {
+    cost += outputTokens * (pricing.output / 1000000);
+  }
 
   const reasoningTokens = tokens.reasoning_tokens || 0;
   if (reasoningTokens > 0) {

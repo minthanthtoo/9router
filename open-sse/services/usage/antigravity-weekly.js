@@ -87,8 +87,9 @@ export function parseWeeklyQuotaSummary(data) {
       // Disabled weekly buckets are truly disabled and skipped.
       if (bucket.disabled === true && isWeekly) continue;
 
+      if (bucket.disabled !== true && (!(typeof bucket.remainingFraction === "number" || typeof bucket.remainingFraction === "string" && bucket.remainingFraction.trim()))) continue;
       const remainingFraction = bucket.disabled === true ? 0 : Number(bucket.remainingFraction);
-      if (!Number.isFinite(remainingFraction)) continue;
+      if (!Number.isFinite(remainingFraction) || remainingFraction < 0 || remainingFraction > 1) continue;
 
       // Match group to a known family
       for (const config of GROUP_CONFIGS) {
@@ -107,6 +108,10 @@ export function parseWeeklyQuotaSummary(data) {
             remainingPercentage: remainingFraction * 100,
             unlimited: false,
             displayName: target.displayName,
+            displayUnit: "normalized_percentage",
+            quotaSource: "antigravity_usage",
+            quotaConfidence: "provider_confirmed",
+            observedAt: new Date().toISOString(),
           };
           break;
         }

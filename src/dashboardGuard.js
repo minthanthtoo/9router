@@ -230,6 +230,11 @@ export async function proxy(request) {
     return NextResponse.json({ error: "API key required for remote API access" }, { status: 401 });
   }
 
+  // This exact service route performs its own dashboard-session or bearer-token
+  // authentication. Keep the exception scoped to one path; /api/private/* stays
+  // deny-by-default.
+  if (pathname === "/api/private/image-quota/v1") return NextResponse.next();
+
   // Deny-by-default for /api/* — public allow-list bypasses, everything else requires auth.
   if (pathname.startsWith("/api/")) {
     if (isPublicApi(pathname)) return NextResponse.next();

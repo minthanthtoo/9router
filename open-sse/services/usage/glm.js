@@ -24,7 +24,8 @@ export function parseGlmQuotaResponse(json) {
   for (const limit of limits) {
     // 1. Accept both TOKENS_LIMIT and CREDIT_LIMIT from GLM API
     if (!limit || (limit.type !== "TOKENS_LIMIT" && limit.type !== "CREDIT_LIMIT")) continue;
-    const usedPercent = Number(limit.percentage) || 0;
+    if (!(typeof limit.percentage === "number" || typeof limit.percentage === "string" && limit.percentage.trim()) || !Number.isFinite(Number(limit.percentage)) || Number(limit.percentage) < 0 || Number(limit.percentage) > 100) continue;
+    const usedPercent = Number(limit.percentage);
     const resetMs = Number(limit.nextResetTime) || 0;
     const remaining = Math.max(0, 100 - usedPercent);
 

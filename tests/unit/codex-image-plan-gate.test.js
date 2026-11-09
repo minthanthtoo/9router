@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../../src/sse/services/auth.js", () => ({
+  admitImageQuotaRequest: vi.fn(async () => ({ allowed: true })),
+  getImageQuotaPoolAvailability: vi.fn(async () => ({ hasConnections: true })),
   getProviderCredentials: async (_provider, excludeConnectionIds) =>
     mocks.connections.find((c) => !excludeConnectionIds.has(c.connectionId)) || null,
   markAccountUnavailable: mocks.markAccountUnavailable,

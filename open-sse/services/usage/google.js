@@ -4,7 +4,7 @@
 
 import { CLIENT_METADATA } from "../../config/appConstants.js";
 import { ANTIGRAVITY_IDE_USER_AGENT, ANTIGRAVITY_IDE_VERSION, ANTIGRAVITY_OAUTH_CLIENT } from "../../providers/shared.js";
-import { U, parseResetTime, normalizeCloudCodeProjectId, fetchWithTimeout } from "./shared.js";
+import { U, parseResetTime, toFiniteNumber, normalizeCloudCodeProjectId, fetchWithTimeout } from "./shared.js";
 import { fetchAntigravityWeeklyQuota } from "./antigravity-weekly.js";
 
 // Antigravity API config (from Quotio) — urls from registry, oauth client + dynamic UA kept here
@@ -68,7 +68,8 @@ export async function getGeminiUsage(accessToken, providerSpecificData, proxyOpt
       for (const bucket of data.buckets) {
         if (!bucket.modelId || bucket.remainingFraction == null) continue;
 
-        const remainingFraction = Number(bucket.remainingFraction) || 0;
+        const remainingFraction = toFiniteNumber(bucket.remainingFraction, null);
+        if (remainingFraction === null || remainingFraction < 0 || remainingFraction > 1) continue;
         const total = 1000; // Normalized base, matches antigravity convention
         const remaining = Math.round(total * remainingFraction);
         const used = Math.max(0, total - remaining);
@@ -210,7 +211,35 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
           continue;
         }
 
-        const remainingFraction = info.quotaInfo.remainingFraction || 0;
+        const rawRemainingFraction = info.quotaInfo.remainingFraction;
+        const remainingFractionNumber = Number(rawRemainingFraction);
+        const hasRemainingFraction = (typeof rawRemainingFraction === "number" || typeof rawRemainingFraction === "string")
+          && rawRemainingFraction !== null
+          && rawRemainingFraction !== undefined
+          && String(rawRemainingFraction).trim() !== ""
+          && Number.isFinite(remainingFractionNumber)
+          && remainingFractionNumber >= 0
+          && remainingFractionNumber <= 1;
+        const isImageModel = modelKey === "gemini-3.1-flash-image";
+        if (isImageModel && !hasRemainingFraction) {
+          quotas[modelKey] = {
+            used: 0,
+            total: 0,
+            resetAt: parseResetTime(info.quotaInfo.resetTime),
+            remainingPercentage: null,
+            unlimited: false,
+            displayName: info.displayName || modelKey,
+            displayUnit: "normalized_percentage",
+            quotaStatus: "unknown",
+            quotaKind: "image_generation",
+            quotaSource: "antigravity_usage",
+            quotaConfidence: "unknown",
+            observedAt: new Date().toISOString(),
+          };
+          continue;
+        }
+
+        const remainingFraction = hasRemainingFraction ? remainingFractionNumber : 0;
         const remainingPercentage = remainingFraction * 100;
 
         // Convert percentage to used/total for UI compatibility
@@ -226,6 +255,11 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
           remainingPercentage,
           unlimited: false,
           displayName: info.displayName || modelKey,
+          displayUnit: "normalized_percentage",
+          ...(isImageModel ? { quotaStatus: "reported", quotaKind: "image_generation" } : {}),
+          quotaSource: "antigravity_usage",
+          quotaConfidence: hasRemainingFraction ? "provider_confirmed" : "unknown",
+          observedAt: new Date().toISOString(),
         };
       }
     }

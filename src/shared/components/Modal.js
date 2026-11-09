@@ -5,6 +5,8 @@ import { cn } from "@/shared/utils/cn";
 import Button from "./Button";
 import Tooltip from "./Tooltip";
 
+let openModals = 0, previousOverflow = "";
+
 export default function Modal({
   isOpen,
   onClose,
@@ -25,12 +27,9 @@ export default function Modal({
   };
 
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
-    return () => { document.body.style.overflow = ""; };
+    if (!isOpen) return;
+    if (openModals++ === 0) { previousOverflow = document.body.style.overflow; document.body.style.overflow = "hidden"; }
+    return () => { if (--openModals === 0) document.body.style.overflow = previousOverflow; };
   }, [isOpen]);
 
   useEffect(() => {

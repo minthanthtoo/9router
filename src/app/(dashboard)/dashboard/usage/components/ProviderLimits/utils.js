@@ -1,3 +1,4 @@
+import { partitionRotationRows } from "@/shared/utils/rotationSequence.mjs";
 import { getModelsByProviderId } from "open-sse/config/providerModels.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -16,12 +17,137 @@ export const ACCOUNT_FILTER_OPTIONS = [
   { value: "inactive", label: "Turned off" },
 ];
 export const QUOTA_SORT_OPTIONS = [
-  { value: "default", label: "Default quota order" },
-  { value: "remaining-asc", label: "% quota: low to high" },
-  { value: "remaining-desc", label: "% quota: high to low" },
+  { key: "session-reset", label: "Session reset", icon: "update", window: "session", kind: "reset", asc: "Earliest first", desc: "Latest first" },
+  { key: "weekly-reset", label: "Weekly reset", icon: "event_repeat", window: "weekly", kind: "reset", asc: "Earliest first", desc: "Latest first" },
+  { key: "session-remaining", label: "Session left %", icon: "percent", window: "session", kind: "remaining", asc: "Lowest first", desc: "Highest first" },
+  { key: "weekly-remaining", label: "Weekly left %", icon: "percent", window: "weekly", kind: "remaining", asc: "Lowest first", desc: "Highest first" },
 ];
 
+export const QUOTA_DIVISION_OPTIONS = [
+  { key: "half", label: "Equal count", short: "½", icon: "splitscreen", detail: "Split the preceding order into two balanced card counts; ties may split." },
+  { key: "median", label: "P50 value", short: "P50", icon: "align_center", detail: "Split at the preceding values' median; keep equal values together. Unreported values form a trailing group." },
+  { key: "gap", label: "Largest gap", short: "Gap", icon: "expand", detail: "Split at the largest jump in the preceding values; equal values stay together. Unreported values form a trailing group." },
+];
+export function cycleQuotaDivision(sorts, key) {
+  const index = sorts.findIndex(sort => sort.key === key);
+  if (index < 1) return sorts;
+  return sorts.map((sort, i) => i === index ? { ...sort, division: QUOTA_DIVISION_OPTIONS[(QUOTA_DIVISION_OPTIONS.findIndex(mode => mode.key === (sort.division || "half")) + 1) % QUOTA_DIVISION_OPTIONS.length].key } : sort);
+}
+
+function quotaValueRange(rows, index) {
+  const values = rows.map(row => row.values[index]).filter(value => value !== null);
+  return { min: values.length ? Math.min(...values) : null, max: values.length ? Math.max(...values) : null, missing: rows.length-values.length };
+}
+
+// Boundaries and membership come from the same partition; never recalculate P50 on a child.
+export function describeQuotaDivision(ordered, valueIndex, direction, mode = "half") {
+  return partitionRotationRows(ordered, valueIndex, direction, mode);
+}
+
+export function divideQuotaRows(ordered, valueIndex, direction, mode = "half") {
+  return describeQuotaDivision(ordered,valueIndex,direction,mode).map(group=>group.rows);
+}
+
+export function formatQuotaSortValue(value, kind) {
+  if (value === null || value === undefined) return "Unreported";
+  return kind === "reset" ? new Date(value).toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit",second:"2-digit"}) : `${Number(value.toFixed(2))}%`;
+}
+function formatQuotaGap(value, kind) {
+  if (kind !== "reset") return `${Number(value.toFixed(2))} pp`;
+  const seconds=Math.round(value/1000),days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600),minutes=Math.floor(seconds%3600/60),rest=seconds%60;
+  return [days&&`${days}d`,hours&&`${hours}h`,minutes&&`${minutes}m`,rest&&`${rest}s`].filter(Boolean).join(" ") || "<1s";
+}
+export function quotaSegmentDescription(segment) {
+  const rangeText=detail=>{
+    const value=n=>formatQuotaSortValue(n,detail.kind);
+    const range=detail.min===null?"Unreported":detail.min===detail.max?value(detail.min):`${value(detail.min)}–${value(detail.max)}`;
+    return range+(detail.missing&&detail.min!==null?` · ${detail.missing} unreported`:"");
+  };
+  const details=(segment.boundaries||[]).map(detail=>{
+    const value=n=>formatQuotaSortValue(n,detail.kind);
+    if(detail.mode==="half")return `${detail.label} · ½ count ${detail.startRank}–${detail.endRank}/${detail.parentCount} · ${rangeText(detail)}`;
+    const boundary=detail.mode==="median"?`P50 ${value(detail.threshold)}`:detail.gap?`Gap ${formatQuotaGap(detail.gap.size,detail.kind)} (${value(detail.gap.from)} → ${value(detail.gap.to)})`:"Gap: no distinct values";
+    return `${detail.label} · ${boundary} · ${rangeText(detail)}`;
+  });
+  if(!details.length&&segment.ordering)details.push(`${segment.ordering.label} ${segment.ordering.direction==="asc"?"↑":"↓"} · ${rangeText(segment.ordering)}`);
+  return details;
+}
+
+export function quotaActiveSegmentIndex(cardTops, edge, listBottom) {
+  if(listBottom<=edge)return -1;
+  return cardTops.reduce((active,top,index)=>top<=edge+1?index:active,-1);
+}
+
+export function quotaSegmentScrollTop({ scrollTop, cardTop, viewportTop, toolbarHeight, segmentHeight, gap }) {
+  return Math.max(0,scrollTop+cardTop-viewportTop-toolbarHeight-segmentHeight-gap);
+}
+
+export function isQuotaCardCollapsed(state, id) {
+  return state.overrides[id] ?? state.all;
+}
+export function updateQuotaCardCollapse(state, { id, all }) {
+  if (typeof all === "boolean") return { all, overrides: {} };
+  const collapsed = !isQuotaCardCollapsed(state, id);
+  const overrides = { ...state.overrides };
+  if (collapsed === state.all) delete overrides[id]; else overrides[id] = collapsed;
+  return { ...state, overrides };
+}
+
+export function cycleQuotaSort(sorts, key) {
+  if (!QUOTA_SORT_OPTIONS.some(option => option.key === key)) return sorts;
+  const active = sorts.find(sort => sort.key === key);
+  if (!active) return [...sorts, { key, direction: "asc" }];
+  if (active.direction === "asc") return sorts.map(sort => sort.key === key ? { ...sort, direction: "desc" } : sort);
+  return sorts.filter(sort => sort.key !== key);
+}
+
+export function updateQuotaRotationPreview(current, provider, model, sorts, resetPriority) {
+  if (current?.provider !== provider) return null;
+  return {
+    ...current,
+    model,
+    policy: {
+      ...current.policy,
+      enabled: sorts.length > 0 || resetPriority.enabled,
+      sorts,
+      resetPriority,
+    },
+  };
+}
+
+function matchesQuotaWindow(quota, window) {
+  if (Number.isSafeInteger(quota.windowSeconds) && quota.windowSeconds > 0) return window === "weekly" ? quota.windowSeconds === 604800 : quota.windowSeconds <= 86400;
+  const label = `${quota.quotaType || ""} ${quota.modelKey || ""} ${quota.name || ""}`.replace(/[_-]+/g, " ");
+  const weekly = /\b(?:weekly|7d|7\s*days?|seven\s*days?)\b/i.test(label);
+  return window === "weekly" ? weekly : !weekly && /\b(?:session|hourly|5h|five\s*hours?|\d+(?:\.\d+)?\s*h|\d+\s*hours?)\b/i.test(label);
+}
+
+function finiteQuotaNumber(value) {
+  if (value == null || typeof value === "boolean" || String(value).trim() === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
+export function withCodexImageQuota(quotas, row, now = Date.now()) {
+  if (quotas.some((quota) => /^image(?:_gen|gen_premium)_(?:primary|secondary)$/.test(quota.quotaType || ""))) return quotas;
+  const resets = (row?.constraints || [])
+    .filter((constraint) => constraint.confidence === "provider_confirmed"
+      && ["codex_provider_reset", "codex_usage_window_reset", "provider_retry_after", "provider_image_error"].includes(constraint.source))
+    .map((constraint) => Date.parse(constraint.retryAt))
+    .filter((time) => Number.isFinite(time) && time > now);
+  return [...quotas, {
+    name: "Images",
+    quotaType: "image_window_unreported",
+    used: 0,
+    total: 0,
+    quotaStatus: "unknown",
+    displayUnit: "image_window_unreported",
+    resetAt: resets.length ? new Date(Math.max(...resets)).toISOString() : null,
+  }];
+}
+
 export function getConnectionLabel(connection) {
   return connection.name?.trim()
     || connection.email?.trim()
@@ -29,11 +155,21 @@ export function getConnectionLabel(connection) {
     || null;
 }
 
-export function getConnectionQuotaRemaining(connection, quotaData) {
-  const quota = quotaData[connection.id]?.quotas?.[0];
-  if (!quota) return Number.POSITIVE_INFINITY;
-  if (typeof quota.remaining === "number") return quota.remaining;
-  return Number.POSITIVE_INFINITY;
+export function getConnectionQuotaRemaining(connection, quotaData, window = "session") {
+  const quotas = quotaData[connection.id]?.quotas || [];
+  const primary = quotas.find(quota => quota.quotaType === window && matchesQuotaWindow(quota, window));
+  const values = (primary ? [primary] : quotas.filter(quota => matchesQuotaWindow(quota, window)))
+    .map(quota => {
+      if (quota.quotaStatus === "unknown") return null;
+      const percent = finiteQuotaNumber(quota.remainingPercentage);
+      if (percent !== null) return Math.max(0, Math.min(100, percent));
+      const used = finiteQuotaNumber(quota.used);
+      const total = finiteQuotaNumber(quota.total);
+      if (used !== null && used >= 0 && total !== null && total > 0) return Math.max(0, Math.min(100, (total - used) / total * 100));
+      const remaining = finiteQuotaNumber(quota.remaining);
+      return remaining === null ? null : Math.max(0, Math.min(100, remaining));
+    }).filter(value => value !== null);
+  return values.length ? Math.min(...values) : null;
 }
 
 // Stable group-by-provider: first-seen provider order, original order within group.
@@ -47,51 +183,50 @@ function groupByProviderStable(connections) {
   return Array.from(seen.values()).flat();
 }
 
-export function sortVisibleConnections(
-  connections,
-  quotaData,
-  expiringFirst,
-  providerFilter,
-  quotaSortMode,
-) {
-  if (providerFilter === "codex" && quotaSortMode !== "default") {
-    return [...connections].sort((a, b) => {
-      const remainingA = getConnectionQuotaRemaining(a, quotaData);
-      const remainingB = getConnectionQuotaRemaining(b, quotaData);
-      const remainingDiff =
-        quotaSortMode === "remaining-asc"
-          ? remainingA - remainingB
-          : remainingB - remainingA;
-      if (remainingDiff !== 0) return remainingDiff;
-      return (getConnectionLabel(a) || "").localeCompare(
-        getConnectionLabel(b) || "",
-      );
-    });
-  }
-
-  if (!expiringFirst) return groupByProviderStable(connections);
-
-  const getEarliestResetTime = (connection) => {
-    const resetTimes = (quotaData[connection.id]?.quotas || [])
-      .map((quota) =>
-        quota.resetAt
-          ? new Date(quota.resetAt).getTime()
-          : Number.POSITIVE_INFINITY,
-      )
-      .filter((time) => Number.isFinite(time));
-    return resetTimes.length > 0
-      ? Math.min(...resetTimes)
-      : Number.POSITIVE_INFINITY;
+export function segmentVisibleConnections(connections, quotaData, sorts = [], now = Date.now()) {
+  const rules = sorts.map(sort => ({ ...QUOTA_SORT_OPTIONS.find(option => option.key === sort.key), direction: sort.direction, division: sort.division || "half" }))
+    .filter(rule => rule.key && ["asc", "desc"].includes(rule.direction));
+  const priority = connections.filter(connection => connection.rotationHint);
+  const regular = connections.filter(connection => !connection.rotationHint);
+  if (!rules.length) return priority.length ? [
+    {key:"reset",rotationName:"Expiring credit",connections:priority},
+    ...(regular.length ? [{key:"regular",rotationName:"Other accounts",connections:groupByProviderStable(regular)}] : []),
+  ] : [{ key: "all", connections: groupByProviderStable(connections) }];
+  const rows = connections.map(connection => ({
+    connection,
+    values: rules.map(rule => {
+      if (rule.kind === "remaining") return getConnectionQuotaRemaining(connection, quotaData, rule.window);
+      const resets = (quotaData[connection.id]?.quotas || [])
+        .filter(quota => matchesQuotaWindow(quota, rule.window) && quota.resetAt)
+        .map(quota => new Date(quota.resetAt).getTime())
+        .filter(time => Number.isFinite(time) && time > now);
+      return resets.length ? Math.min(...resets) : null;
+    }),
+  }));
+  const compare = (index) => (a,b) => {
+    const left = a.values[index], right = b.values[index];
+    if (left === right) return 0;
+    if (left === null || right === null) return left === null ? 1 : -1;
+    return (left-right) * (rules[index].direction === "asc" ? 1 : -1);
   };
+  const descend = (list, depth, path, boundaries) => {
+    if (!list.length) return [];
+    const ordered = [...list].sort(compare(depth));
+    if (depth + 1 < rules.length && ordered.length > 1) {
+      return describeQuotaDivision(ordered, depth, rules[depth].direction, rules[depth+1].division)
+        .flatMap(({rows:part,detail},index) => descend(part,depth+1,[...path,index+1],[...boundaries,{...detail,key:rules[depth].key,label:rules[depth].label,kind:rules[depth].kind,direction:rules[depth].direction}]));
+    }
+    return ordered.length ? [{ key: path.join(".") || "1", connections: ordered.map(row => row.connection), boundaries,
+      ordering:{...rules[depth],mode:"half",startRank:1,endRank:ordered.length,parentCount:ordered.length,...quotaValueRange(ordered,depth)} }] : [];
+  };
+  return priority.length ? [
+    ...descend(rows.filter(row => row.connection.rotationHint),0,["reset"],[]).map(segment => ({...segment,rotationName:"Expiring credit"})),
+    ...descend(rows.filter(row => !row.connection.rotationHint),0,["regular"],[]).map(segment => ({...segment,rotationName:"Other accounts"})),
+  ] : descend(rows,0,[],[]);
+}
 
-  return [...connections].sort((a, b) => {
-    const expiryDiff = getEarliestResetTime(a) - getEarliestResetTime(b);
-    if (expiryDiff !== 0) return expiryDiff;
-    return (
-      (a.provider || "").localeCompare(b.provider || "") ||
-      (getConnectionLabel(a) || "").localeCompare(getConnectionLabel(b) || "")
-    );
-  });
+export function sortVisibleConnections(connections, quotaData, sorts = [], now = Date.now()) {
+  return segmentVisibleConnections(connections, quotaData, sorts, now).flatMap(segment => segment.connections);
 }
 
 export function buildLoadingState(connections) {
@@ -122,9 +257,9 @@ export function getConnectionsEmptyMessage(totals, providerFilter, accountFilter
   if (!totals.eligibleConnections) {
     return {
       icon: "cloud_off",
-      title: "No Providers Connected",
+      title: "No Supported OAuth Quota Accounts",
       description:
-        "Connect to providers with OAuth to track your API quota limits and usage.",
+        "This section tracks supported OAuth quota accounts. API-key image routing status is shown separately above.",
     };
   }
   if (!totals.providerFilteredConnections) {
@@ -294,24 +429,52 @@ export function calculatePercentage(used, total) {
   return Math.round(((total - used) / total) * 100);
 }
 
+function hasKnownQuotaUsage(quota) {
+  if (!quota || quota.used === null || quota.used === undefined || quota.used === ""
+    || quota.total === null || quota.total === undefined || quota.total === "") {
+    return false;
+  }
+  const used = Number(quota.used);
+  const total = Number(quota.total);
+  return Number.isFinite(used) && used >= 0 && Number.isFinite(total) && total > 0;
+}
+
+/** A global connection may be disabled only when every reported quota is empty. */
+export function areAllReportedQuotasDepleted(quotas) {
+  return Array.isArray(quotas) && quotas.length > 0 && quotas.every((quota) =>
+    hasKnownQuotaUsage(quota)
+      && calculatePercentage(quota.used, quota.total) <= DEPLETED_QUOTA_THRESHOLD,
+  );
+}
+
+/** Re-enable only when at least one reported quota explicitly has headroom. */
+export function hasReportedQuotaAvailable(quotas) {
+  return Array.isArray(quotas) && quotas.some((quota) =>
+    hasKnownQuotaUsage(quota)
+      && calculatePercentage(quota.used, quota.total) > DEPLETED_QUOTA_THRESHOLD,
+  );
+}
+
 /**
  * Get remaining percentage from a normalized quota row
  * @param {Object} quota - Normalized quota object
  * @returns {number} Remaining percentage (0-100)
  */
 export function getRemainingPercentage(quota) {
-  if (quota?.percentage !== undefined) {
-    // Providers may report the used share; the UI renders the remaining one.
-    const value = quota.percentageIsUsed === true ? 100 - quota.percentage : quota.percentage;
-    return Math.max(0, Math.round(value));
-  }
+  if (quota?.quotaStatus === "unknown") return null;
 
   if (quota?.remaining !== undefined) {
-    return Math.max(0, Math.round(quota.remaining));
+    return Math.max(0, Math.min(100, Math.round(quota.remaining)));
   }
 
   if (quota?.remainingPercentage !== undefined) {
-    return Math.round(quota.remainingPercentage);
+    return Math.max(0, Math.min(100, Math.round(quota.remainingPercentage)));
+  }
+
+  const percentage = quota?.percentage ?? quota?.colorPercentage;
+  if (Number.isFinite(Number(percentage))) {
+    const value = Number(percentage);
+    return Math.max(0, Math.min(100, Math.round(quota?.percentageIsUsed ? 100 - value : value)));
   }
 
   return calculatePercentage(quota?.used, quota?.total);
@@ -332,25 +495,30 @@ export function trimHiddenQuotaKeys(hidden = [], quotas = []) {
   return [...new Set(hidden.map((k) => String(k).trim()).filter((k) => validKeys.has(k)))];
 }
 
-function getProviderHiddenQuotaSet(provider, quotaVisibility, quotas = []) {
-  const hidden = quotaVisibility?.[provider]?.hidden;
-  if (!Array.isArray(hidden) || hidden.length === 0) return new Set();
-  const trimmed = quotas.length > 0 ? trimHiddenQuotaKeys(hidden, quotas) : hidden;
-  return new Set(trimmed.map(String));
+export function getSharedQuotaVisibilityKey(quota) {
+  return getQuotaVisibilityKey(quota).toLowerCase();
+}
+
+export function setSharedQuotaVisibility(visibility, quota, visible) {
+  const key = getSharedQuotaVisibilityKey(quota);
+  if (!key) return visibility;
+  return { ...visibility, sharedRows: { ...visibility.sharedRows, [key]: visible } };
+}
+
+function isQuotaRowVisible(provider, quota, visibility) {
+  const shared = visibility.sharedRows?.[getSharedQuotaVisibilityKey(quota)];
+  if (typeof shared === "boolean") return shared;
+  return !visibility[provider]?.hidden?.includes(getQuotaVisibilityKey(quota));
 }
 
 export function filterQuotasByVisibility(provider, quotas = [], quotaVisibility = {}) {
-  if (!Array.isArray(quotas) || quotas.length === 0) return [];
-  const hidden = getProviderHiddenQuotaSet(provider, quotaVisibility, quotas);
-  if (hidden.size === 0) return quotas;
-  return quotas.filter((quota) => !hidden.has(getQuotaVisibilityKey(quota)));
+  if (!Array.isArray(quotas)) return [];
+  return quotas.filter(quota => isQuotaRowVisible(provider, quota, quotaVisibility));
 }
 
 export function getHiddenQuotaRows(provider, quotas = [], quotaVisibility = {}) {
-  if (!Array.isArray(quotas) || quotas.length === 0) return [];
-  const hidden = getProviderHiddenQuotaSet(provider, quotaVisibility, quotas);
-  if (hidden.size === 0) return [];
-  return quotas.filter((quota) => hidden.has(getQuotaVisibilityKey(quota)));
+  if (!Array.isArray(quotas)) return [];
+  return quotas.filter(quota => !isQuotaRowVisible(provider, quota, quotaVisibility));
 }
 
 /**
@@ -390,6 +558,10 @@ export function parseQuotaData(provider, data) {
           const claudeModels = entries.filter(([k]) => k.startsWith("claude-"));
           const imageModels = entries.filter(([k]) => k.includes("image"));
           const summaryModels = entries.filter(([k]) => summaryKeys.has(k));
+          const usageDisplayMetadata = (quota) => ({
+            ...(quota.displayUnit ? { displayUnit: quota.displayUnit } : {}),
+            ...(quota.quotaStatus ? { quotaStatus: quota.quotaStatus } : {}),
+          });
           const otherModels = entries.filter(([k]) => !k.startsWith("gemini-") && !k.startsWith("claude-") && !k.includes("image") && !summaryKeys.has(k));
 
           // Summary keys from retrieveUserQuotaSummary
@@ -410,6 +582,7 @@ export function parseQuotaData(provider, data) {
                 total: quota.total || 0,
                 resetAt: quota.resetAt || null,
                 remainingPercentage: quota.remainingPercentage,
+                ...usageDisplayMetadata(quota),
               });
             });
           } else if (geminiModels.length > 0) {
@@ -428,6 +601,7 @@ export function parseQuotaData(provider, data) {
                 total: rep.total || 0,
                 resetAt: rep.resetAt || null,
                 remainingPercentage: rep.remainingPercentage,
+                ...usageDisplayMetadata(rep),
               });
             }
           }
@@ -442,6 +616,7 @@ export function parseQuotaData(provider, data) {
                 total: quota.total || 0,
                 resetAt: quota.resetAt || null,
                 remainingPercentage: quota.remainingPercentage,
+                ...usageDisplayMetadata(quota),
               });
             });
           }
@@ -503,6 +678,7 @@ export function parseQuotaData(provider, data) {
                 total: quota.total || 0,
                 resetAt: quota.resetAt || null,
                 remainingPercentage: quota.remainingPercentage,
+                ...usageDisplayMetadata(quota),
               });
             });
           } else if (claudeModels.length > 0) {
@@ -520,6 +696,7 @@ export function parseQuotaData(provider, data) {
                 total: rep.total || 0,
                 resetAt: rep.resetAt || null,
                 remainingPercentage: rep.remainingPercentage,
+                ...usageDisplayMetadata(rep),
               });
             }
           }
@@ -547,6 +724,7 @@ export function parseQuotaData(provider, data) {
               total: quota.total || 0,
               resetAt: quota.resetAt || null,
               remainingPercentage: quota.remainingPercentage,
+              ...usageDisplayMetadata(quota),
             });
           });
 
@@ -564,6 +742,7 @@ export function parseQuotaData(provider, data) {
                 total: quota.total || 0,
                 resetAt: quota.resetAt || null,
                 remainingPercentage: quota.remainingPercentage,
+                ...usageDisplayMetadata(quota),
               });
             });
           }
@@ -574,7 +753,18 @@ export function parseQuotaData(provider, data) {
         if (data.quotas) {
           Object.entries(data.quotas).forEach(([quotaType, quota]) => {
             let displayName = quotaType;
-            if (quotaType === "spark_session") displayName = "Spark (5h)";
+            if (quota.quotaKind === "image_generation" && ["image_gen","imagegen_premium"].includes(quota.limitId)) {
+              const seconds=quota.windowSeconds;
+              const duration=seconds?seconds%86400===0?`${seconds/86400}d`:seconds%3600===0?`${seconds/3600}h`:seconds%60===0?`${seconds/60}m`:`${seconds}s`:"reported window";
+              displayName=`${quota.limitId === "imagegen_premium" ? "Images Premium" : "Images"} (${duration})`;
+            }
+            else if (Number.isSafeInteger(quota.windowSeconds) && quota.windowSeconds > 0) {
+              const seconds = quota.windowSeconds;
+              const duration = seconds === 604800 ? "Weekly" : seconds % 86400 === 0 ? `${seconds / 86400}d` : seconds % 3600 === 0 ? `${seconds / 3600}h` : seconds % 60 === 0 ? `${seconds / 60}m` : `${seconds}s`;
+              const family = quotaType.startsWith("spark_") ? "Spark" : quotaType.startsWith("review_") ? "Review" : "";
+              displayName = family ? `${family} (${duration})` : duration;
+            }
+            else if (quotaType === "spark_session") displayName = "Spark (5h)";
             else if (quotaType === "spark_weekly") displayName = "Spark (Weekly)";
             else if (quotaType === "session") displayName = "5h";
             else if (quotaType === "weekly") displayName = "Weekly";
@@ -584,6 +774,9 @@ export function parseQuotaData(provider, data) {
             normalizedQuotas.push({
               name: displayName,
               quotaType,
+              windowSeconds: quota.windowSeconds,
+              quotaStatus: quota.quotaStatus,
+              ...(quota.quotaKind === "image_generation" ? { displayUnit: "provider_percentage" } : {}),
               used: quota.used || 0,
               total: quota.total || 0,
               remaining: quota.remaining,

@@ -1,0 +1,23 @@
+.modal { display: flex; flex-direction: column; max-height: calc(100dvh - 24px); overflow: hidden; }
+.modal > :last-child { display: flex; min-height: 0; padding: 0; max-height: calc(100dvh - 88px); overflow: hidden; }
+.editor { display: flex; flex-direction: column; width: 100%; min-width: 0; outline: none; container-type: inline-size; }
+.body { display: flex; flex-direction: column; gap: 14px; padding: 16px; min-height: 0; overflow-y: auto; }
+.footer { flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--color-border); background: var(--color-surface); }
+.previewControls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 8px; border-top: 1px solid var(--color-border); }
+.ruleEditor > summary { cursor: pointer; font-size: 12px; color: var(--color-text-muted); padding: 5px 0; }
+.ruleBody { display: flex; flex-direction: column; gap: 12px; padding-top: 10px; }
+@container (max-width: 600px) {
+  .body { padding: 12px; gap: 12px; }
+  .footer { padding: 8px 12px; }
+  .previewControls > label { flex-basis: 100%; }
+}
+
+.sortArea { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+.sortArea > :last-child { flex-basis: 260px; }
+.context { min-width: 0; max-width: 100%; }
+.context > summary { display: flex; align-items: center; gap: 6px; min-height: 36px; cursor: pointer; border: 1px solid var(--color-border); border-radius: 18px; padding: 6px 10px; font-size: 12px; }
+.context > summary > span:nth-child(2) { min-width: 0; overflow-wrap: anywhere; }
+.contextFields { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; padding-top: 8px; }
+.context[open] { flex-basis: 100%; }
+
+.context:not([open]) > .contextFields { display: none; }

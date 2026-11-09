@@ -89,6 +89,57 @@ describe("Gemini native v1beta endpoint", () => {
     expect(names).toContain("models/gemini-2.5-pro-preview-tts");
   });
 
+  it.each([
+    ["gemini-3.1-flash-tts-preview", ["IMAGE"]],
+    ["gemini-3.1-flash-tts-preview", ["AUDIO", "IMAGE"]],
+    ["gemini-3.1-flash-tts-preview", ["audio", "image"]],
+    ["gemini-3.1-flash-image", ["AUDIO"]],
+  ])("blocks image output before native passthrough for %s with %j", async (model, modalities) => {
+    const body = audioBody();
+    body.generationConfig.responseModalities = modalities;
+    const response = await POST(makeGeminiRequest(`${model}:generateContent`, body), {
+      params: Promise.resolve({ path: [`${model}:generateContent`] }),
+    });
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe("image_generation_requires_managed_route");
+    expect(mocks.handleChat).not.toHaveBeenCalled();
+    expect(mocks.getProviderCredentials).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("blocks streaming mixed AUDIO/IMAGE before native passthrough", async () => {
+    const body = audioBody();
+    body.generationConfig.responseModalities = ["AUDIO", "IMAGE"];
+    const response = await POST(makeGeminiRequest("gemini-3.1-flash-tts-preview:streamGenerateContent", body), {
+      params: Promise.resolve({ path: ["gemini-3.1-flash-tts-preview:streamGenerateContent"] }),
+    });
+    expect(response.status).toBe(400);
+    expect(mocks.getProviderCredentials).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("preserves client authentication before rejecting image output", async () => {
+    mocks.isValidApiKey.mockResolvedValue(false);
+    const body = audioBody();
+    body.generationConfig.responseModalities = ["IMAGE"];
+    const response = await POST(makeGeminiRequest("gemini-3.1-flash-tts-preview:generateContent", body), {
+      params: Promise.resolve({ path: ["gemini-3.1-flash-tts-preview:generateContent"] }),
+    });
+    expect(response.status).toBe(401);
+    expect(mocks.getProviderCredentials).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps Gemini image-input vision requests on the text chat path", async () => {
+    const response = await POST(makeGeminiRequest("gemini-2.5-flash:generateContent", {
+      contents: [{ role: "user", parts: [{ text: "Describe this image" }, { inlineData: { mimeType: "image/png", data: "aGVsbG8=" } }] }],
+      generationConfig: { responseModalities: ["TEXT"] },
+    }), { params: Promise.resolve({ path: ["gemini-2.5-flash:generateContent"] }) });
+    expect(response.status).toBe(200);
+    expect(mocks.handleChat).toHaveBeenCalledTimes(1);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   it("passes Gemini AUDIO generateContent requests through to Google's native endpoint", async () => {
     const body = audioBody();
     const response = await POST(makeGeminiRequest("gemini-3.1-flash-tts-preview:generateContent", body), {

@@ -4,7 +4,7 @@
 
 import { proxyAwareFetch } from "../../utils/proxyFetch.js";
 import { resolveDefaultProfileArn } from "../../config/kiroConstants.js";
-import { U, parseResetTime } from "./shared.js";
+import { U, parseResetTime, toFiniteNumber } from "./shared.js";
 
 /**
  * Kiro (AWS CodeWhisperer) Usage
@@ -16,13 +16,15 @@ function parseKiroQuotaData(data) {
 
   usageList.forEach((breakdown) => {
     const resourceType = breakdown.resourceType?.toLowerCase() || "unknown";
-    const used = breakdown.currentUsageWithPrecision || 0;
+    const reportedUsed = toFiniteNumber(breakdown.currentUsageWithPrecision, null);
+    const used = reportedUsed ?? 0;
     const total = breakdown.usageLimitWithPrecision || 0;
 
     quotaInfo[resourceType] = {
       used,
       total,
       remaining: total - used,
+      quotaStatus: reportedUsed === null ? "unknown" : "reported",
       resetAt,
       unlimited: false,
     };

@@ -8,8 +8,9 @@ import Button from "@/shared/components/Button";
 import Badge from "@/shared/components/Badge";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import Select from "@/shared/components/Select";
+import { isValidGeminiProjectId, normalizeGeminiProjectId } from "@/lib/geminiProjectId";
 
-export default function EditConnectionModal({ isOpen, connection, proxyPools, onSave, onClose }) {
+export default function EditConnectionModal({ isOpen, connection, proxyPools, onSave, onClose, focusGeminiProject = false }) {
   const [formData, setFormData] = useState({
     name: "",
     priority: 1,
@@ -22,6 +23,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
     organization: "",
   });
   const [cloudflareData, setCloudflareData] = useState({ accountId: "" });
+  const [geminiProjectId, setGeminiProjectId] = useState("");
   const [awsData, setAwsData] = useState({ profile: "", region: "", accessKeyId: "", sessionToken: "" });
   const [clearAwsSessionToken, setClearAwsSessionToken] = useState(false);
   const [region, setRegion] = useState("");
@@ -50,6 +52,11 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       if (connection.provider === "cloudflare-ai" && connection.providerSpecificData) {
         setCloudflareData({ accountId: connection.providerSpecificData.accountId || "" });
       }
+      if (connection.provider === "gemini") {
+        setGeminiProjectId(connection.providerSpecificData?.googleCloudProjectId
+          || connection.providerSpecificData?.projectId
+          || "");
+      }
       if (AI_PROVIDERS?.[connection.provider]?.credentialForm === "aws") {
         const psd = connection.providerSpecificData || {};
         setAwsData({
@@ -74,11 +81,17 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
   const isOAuth = connection?.authType === "oauth";
   const isAzure = connection?.provider === "azure";
   const isCloudflareAi = connection?.provider === "cloudflare-ai";
+  const isGemini = connection?.provider === "gemini";
   const usesAwsCredentialForm = AI_PROVIDERS?.[connection?.provider]?.credentialForm === "aws";
   const isCompatible = connection
     ? (isOpenAICompatibleProvider(connection.provider) || isAnthropicCompatibleProvider(connection.provider))
     : false;
   const providerRegions = connection ? (AI_PROVIDERS?.[connection.provider]?.regions || null) : null;
+
+  const buildGeminiSpecificData = () => {
+    const googleCloudProjectId = normalizeGeminiProjectId(geminiProjectId);
+    return googleCloudProjectId ? { googleCloudProjectId } : {};
+  };
 
   // Build providerSpecificData for region-aware providers
   const buildRegionSpecificData = () => {
@@ -123,6 +136,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
           apiKey: formData.apiKey,
           ...(isAzure ? { providerSpecificData: azureData } : {}),
           ...(isCloudflareAi ? { providerSpecificData: cloudflareData } : {}),
+          ...(isGemini ? { providerSpecificData: buildGeminiSpecificData() } : {}),
           ...(usesAwsCredentialForm ? { providerSpecificData: buildAwsSpecificData() } : {}),
           ...(providerRegions ? { providerSpecificData: buildRegionSpecificData() } : {}),
         }),
@@ -138,6 +152,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
 
   const handleSubmit = async () => {
     if (!connection) return;
+    if (isGemini && !isValidGeminiProjectId(geminiProjectId)) return;
     setSaving(true);
     try {
       const updates = {
@@ -159,6 +174,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
                 apiKey: formData.apiKey,
                 ...(isAzure ? { providerSpecificData: azureData } : {}),
                 ...(isCloudflareAi ? { providerSpecificData: cloudflareData } : {}),
+                ...(isGemini ? { providerSpecificData: buildGeminiSpecificData() } : {}),
                 ...(usesAwsCredentialForm ? { providerSpecificData: buildAwsSpecificData() } : {}),
                 ...(providerRegions ? { providerSpecificData: buildRegionSpecificData() } : {}),
               }),
@@ -190,6 +206,9 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       }
       if (isCloudflareAi) {
         updates.providerSpecificData = { accountId: cloudflareData.accountId };
+      }
+      if (isGemini) {
+        updates.providerSpecificData = buildGeminiSpecificData();
       }
       if (usesAwsCredentialForm) {
         updates.providerSpecificData = buildAwsSpecificData();
@@ -291,6 +310,19 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
           </div>
         )}
 
+        {isGemini && (
+          <Input
+            id="edit-gemini-project-id"
+            label="Google Cloud project ID or number"
+            value={geminiProjectId}
+            onChange={(e) => setGeminiProjectId(e.target.value.trim().toLowerCase())}
+            placeholder="my-gemini-project"
+            maxLength={30}
+            autoFocus={focusGeminiProject}
+            hint="Gemini API quotas are shared by project. Use the same project ID for every key from that billed project."
+          />
+        )}
+
         {usesAwsCredentialForm && (
           <div className="bg-sidebar/50 p-4 rounded-lg border border-accent/20">
             <h3 className="font-semibold mb-3 text-sm">AWS Bedrock Credentials</h3>
@@ -361,7 +393,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
         )}
 
         <div className="flex gap-2">
-          <Button onClick={handleSubmit} fullWidth disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
+          <Button onClick={handleSubmit} fullWidth disabled={saving || (isGemini && !isValidGeminiProjectId(geminiProjectId))}>{saving ? "Saving..." : "Save"}</Button>
           <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
         </div>
       </div>

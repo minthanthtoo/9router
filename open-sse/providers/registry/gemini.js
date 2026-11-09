@@ -52,8 +52,8 @@ export default {
     { id: "gemini-embedding-001", name: "Gemini Embedding 001", kind: "embedding" },
     { id: "text-embedding-005", name: "Text Embedding 005", kind: "embedding" },
     { id: "text-embedding-004", name: "Text Embedding 004 (Legacy)", kind: "embedding" },
-    { id: "gemini-3.1-flash-image-preview", name: "Gemini 3.1 Flash Image (Nano Banana 2)", params: [], kind: "image" },
-    { id: "gemini-3-pro-image-preview", name: "Gemini 3 Pro Image (Nano Banana Pro)", params: [], kind: "image" },
+    // Google shut down both image preview endpoints on June 25, 2026.
+    { id: "gemini-3.1-flash-image", name: "Gemini 3.1 Flash Image (Nano Banana 2)", params: ["size"], kind: "image" },
     { id: "gemini-2.5-flash-image", name: "Gemini 2.5 Flash Image (Nano Banana)", params: [], kind: "image" },
     { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro (Best)", params: ["language","prompt"], kind: "stt" },
     { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", params: ["language","prompt"], kind: "stt" },

@@ -97,7 +97,7 @@ export class BaseExecutor {
     return { status: response.status, message: bodyText || `HTTP ${response.status}` };
   }
 
-  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, providerOverrides = null, directFetch = null }) {
+  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, providerOverrides = null, disableRetries = false, onBeforeDispatch = null, onImageSubmissionStart = null, directFetch = null }) {
     const fallbackCount = this.getFallbackCount();
     let lastError = null;
     let lastStatus = 0;
@@ -110,6 +110,7 @@ export class BaseExecutor {
     // Schedule retry via retryConfig[statusKey]. Returns true when caller should `urlIndex--; continue`
     // response (optional) lets a subclass hook compute a dynamic delay (e.g. antigravity Retry-After).
     const tryRetry = async (urlIndex, statusKey, reason, response = null) => {
+      if (disableRetries) return false;
       const { attempts, delayMs } = resolveRetryEntry(retryConfig[statusKey]);
       if (attempts <= 0 || retryAttemptsByUrl[urlIndex] >= attempts) return false;
       // Hook: subclass may derive delay from the response (headers/body). null → skip retry, use fallback.
@@ -126,6 +127,7 @@ export class BaseExecutor {
     };
 
     for (let urlIndex = 0; urlIndex < fallbackCount; urlIndex++) {
+      let submissionTicket = null;
       const url = this.buildUrl(model, stream, urlIndex, credentials);
       const transformedBody = this.transformRequest(model, body, stream, credentials);
       const headers = this.buildHeaders(credentials, stream, url, model, transformedBody);
@@ -144,6 +146,20 @@ export class BaseExecutor {
         const bodyStr = JSON.stringify(transformedBody);
         const fetchT0 = Date.now();
         dbg("FETCH", `${this.provider.toUpperCase()} → ${url} | body=${bodyStr.length}B | connectTimeout=${timeoutMs}ms`);
+        const dispatchBlockReason = await onBeforeDispatch?.();
+        if (dispatchBlockReason) {
+          const dispatchBlocked = new Error(`Image provider dispatch blocked: ${dispatchBlockReason}`);
+          dispatchBlocked.imageDispatchBlocked = dispatchBlockReason;
+          throw dispatchBlocked;
+        }
+        const submission = await onImageSubmissionStart?.();
+        const submissionBlockReason = typeof submission === "string" ? submission : submission?.blockedReason;
+        if (submissionBlockReason) {
+          const dispatchBlocked = new Error(`Image provider dispatch blocked: ${submissionBlockReason}`);
+          dispatchBlocked.imageDispatchBlocked = submissionBlockReason;
+          throw dispatchBlocked;
+        }
+        submissionTicket = submission || null;
         const effectiveProxyOptions = forceFreshSocketByUrl[urlIndex]
           ? { ...(proxyOptions || {}), forceFreshSocket: true }
           : proxyOptions;
@@ -152,6 +168,7 @@ export class BaseExecutor {
           headers,
           body: bodyStr,
           signal: mergedSignal,
+          disableRetries,
           // Protocol adapters that need their own transport (opencode's TLS
           // fingerprint) override the direct path; proxies still take priority.
           ...(directFetch ? { directFetch } : {}),
@@ -168,15 +185,18 @@ export class BaseExecutor {
           continue;
         }
 
-        if (this.shouldRetry(response.status, urlIndex)) {
+        if (!disableRetries && this.shouldRetry(response.status, urlIndex, model, stream, transformedBody)) {
           log?.debug?.("RETRY", `${response.status} on ${url}, trying fallback ${urlIndex + 1}`);
           lastStatus = response.status;
           continue;
         }
 
-        return { response, url, headers, transformedBody };
+        return { response, url, headers, transformedBody, submissionTicket };
       } catch (error) {
         clearTimeout(connectTimer);
+        if (submissionTicket && error && typeof error === "object") error.submissionTicket = submissionTicket;
+        if (error?.imageDispatchBlocked) throw error;
+        if (disableRetries) throw error;
         lastError = error;
         const isConnectTimeout = connectCtrl.signal.aborted && error.name === "AbortError";
         dbg("FETCH", `${this.provider.toUpperCase()} ✖ ${error.name}: ${error.message}${isConnectTimeout ? " (connect timeout)" : ""}`);

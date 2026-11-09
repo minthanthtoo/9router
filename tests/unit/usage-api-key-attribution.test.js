@@ -46,6 +46,9 @@ describe("Usage stats API key attribution", () => {
     const stats = await db.getUsageStats("24h");
     const apiKeyEntries = Object.values(stats.byApiKey);
 
+    expect(JSON.stringify(stats)).not.toContain(apiKeyA);
+    expect(JSON.stringify(stats)).not.toContain(apiKeyB);
+
     expect(apiKeyEntries).toHaveLength(2);
 
     expect(
@@ -53,5 +56,9 @@ describe("Usage stats API key attribution", () => {
         .map((entry) => entry.promptTokens)
         .sort((a, b) => a - b)
     ).toEqual([10, 20]);
+
+    const dailyStats = await db.getUsageStats("7d");
+    expect(JSON.stringify(dailyStats)).not.toContain(apiKeyA);
+    expect(JSON.stringify(dailyStats)).not.toContain(apiKeyB);
   });
 });

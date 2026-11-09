@@ -58,7 +58,8 @@ function qs(route, params) {
 
 function windowQuota(win) {
   if (!win || typeof win !== "object") return null;
-  const used = toFiniteNumber(win.used, 0);
+  const reportedUsed = toFiniteNumber(win.used, null);
+  const used = reportedUsed ?? 0;
   const total = toFiniteNumber(win.cap, 0);
   if (total <= 0 && used <= 0) return null;
   return {
@@ -68,6 +69,7 @@ function windowQuota(win) {
     colorPercentage: total > 0 ? Math.round(((total - used) / total) * 100) : 100,
     percentageIsUsed: true,
     remaining: Math.max(0, total - used),
+    quotaStatus: reportedUsed === null ? "unknown" : "reported",
     unlimited: false,
     resetAt: parseResetTime(win.resetAt),
     emptyMessage: used === 0 && !win.resetAt ? "No usage in this window" : null,

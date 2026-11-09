@@ -152,6 +152,15 @@ describe("undici keep-alive dead-socket protection & fresh-socket retry", () => 
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("honors the image submission no-replay fence on a dead socket", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(Object.assign(new Error("fetch failed"), { cause: { code: "UND_ERR_SOCKET" } }));
+    vi.doMock("undici", async () => ({ ...(await vi.importActual("undici")), fetch: fetchMock }));
+    const { proxyAwareFetch, resetDirectDispatchersForTests } = await import("../../open-sse/utils/proxyFetch.js");
+    resetDirectDispatchersForTests();
+    await expect(proxyAwareFetch("https://example.invalid/images", { method: "POST", body: "{}", disableRetries: true })).rejects.toThrow("fetch failed");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("does not replay when FETCH_FRESH_RETRY=off", async () => {
     process.env.FETCH_FRESH_RETRY = "off";
     const fetchMock = vi.fn()
