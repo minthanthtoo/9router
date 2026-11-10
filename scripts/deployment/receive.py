@@ -208,6 +208,7 @@ def deploy(sha):
         files = file_snapshot(DATA)
         docker('POST', '/containers/' + NAME + '/rename?name=' + previous)
         renamed = True
+        docker('POST', '/containers/' + previous + '/update', {'RestartPolicy': {'Name': 'no', 'MaximumRetryCount': 0}})
         config = configuration(old, tag, DATA)
         config['Labels'] = {**(config.get('Labels') or {}), 'org.opencontainers.image.revision': sha}
         docker('POST', '/containers/create?name=' + NAME, config)
@@ -223,7 +224,6 @@ def deploy(sha):
         admitted = True
         docker('POST', '/networks/' + NETWORK + '/connect', {'Container': NAME, 'EndpointConfig': {'Aliases': [NAME]}})
         docker('POST', '/containers/' + NAME + '/update', {'RestartPolicy': old['HostConfig']['RestartPolicy']})
-        docker('POST', '/containers/' + previous + '/update', {'RestartPolicy': {'Name': 'no', 'MaximumRetryCount': 0}})
         healthy(NAME)
         receipt(release / 'result.json', {'commit': sha, 'image': image['Id'], 'previous': previous, 'status': 'deployed'})
         (STATE / 'pending.json').unlink()
@@ -238,6 +238,7 @@ def deploy(sha):
         if renamed:
             docker('POST', '/containers/' + previous + '/rename?name=' + NAME)
         if stopped:
+            docker('POST', '/containers/' + NAME + '/update', {'RestartPolicy': old['HostConfig']['RestartPolicy']})
             docker('POST', '/containers/' + NAME + '/start')
         (STATE / 'pending.json').unlink(missing_ok=True)
         raise

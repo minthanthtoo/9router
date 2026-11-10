@@ -116,6 +116,8 @@ class DeploymentSafety(unittest.TestCase):
                      patch.object(receive.subprocess, 'run', return_value=type('Result', (), {'returncode': 0})()), patch.object(receive.sys, 'stdin', Input()):
                     with self.assertRaises(RuntimeError):
                         receive.deploy(sha)
+                self.assertIn(('POST', '/containers/9router-before-' + sha[:12] + '/update'), calls)
+                self.assertEqual(('POST', '/containers/9router/update') in calls, not after_attachment)
                 self.assertEqual((state / 'pending.json').exists(), after_attachment)
                 self.assertEqual(('DELETE', '/containers/9router?force=true') in calls, not after_attachment)
                 with closing(sqlite3.connect(data / receive.DB)) as db, db:
