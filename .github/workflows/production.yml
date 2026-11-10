@@ -40,7 +40,9 @@ jobs:
           context: .
           load: true
           tags: 9router-ci:${{ github.sha }}
-          build-args: APP_VERSION=${{ github.sha }}
+          build-args: |
+            APP_VERSION=${{ github.sha }}
+            BUILD_NODE_OPTIONS=--max-old-space-size=3072
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
