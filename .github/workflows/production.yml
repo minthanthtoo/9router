@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [master]
   push:
-    branches: [master]
+    branches: ['**']
   workflow_dispatch:
 
 permissions:
@@ -12,6 +12,9 @@ permissions:
 
 jobs:
   check-build:
+    concurrency:
+      group: checks-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     if: github.repository == 'minthanthtoo/9router'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
