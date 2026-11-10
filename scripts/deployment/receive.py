@@ -104,7 +104,8 @@ def snapshot(path):
 def file_snapshot(root):
     ignored = {'data.sqlite', 'data.sqlite-wal', 'data.sqlite-shm', 'data.sqlite-journal'}
     return {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in root.rglob('*') if p.is_file() and p.name not in ignored}
+            for p in root.rglob('*') if p.is_file() and p.name not in ignored
+            and p.relative_to(root).parts[:2] != ('db', 'backups')}
 
 
 def preserved(before, after):

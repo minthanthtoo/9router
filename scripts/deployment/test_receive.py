@@ -147,6 +147,9 @@ class DeploymentSafety(unittest.TestCase):
             receive.copy_data(source, root / 'backup')
             self.assertEqual(receive.snapshot(source / receive.DB), receive.snapshot(root / 'backup' / receive.DB))
             self.assertEqual(receive.file_snapshot(source), receive.file_snapshot(root / 'backup'))
+            (source / 'db/backups').mkdir()
+            (source / 'db/backups/schema-19-to-20.sqlite').write_text('migration recovery copy')
+            self.assertEqual(receive.file_snapshot(source), receive.file_snapshot(root / 'backup'))
             (source / 'link').symlink_to('/etc/passwd')
             with self.assertRaises(RuntimeError):
                 receive.copy_data(source, root / 'unsafe')
