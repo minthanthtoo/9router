@@ -126,6 +126,7 @@ def configuration(old, image, data, rehearsal=False):
     host.update(NetworkMode='none', RestartPolicy={'Name': 'no', 'MaximumRetryCount': 0})
     host.pop('PortBindings', None)
     if rehearsal:
+        host.pop('Mounts', None)
         host['Binds'] = [f'{data}:/app/data']
         overrides = {'IMAGE_ADMIN_TEST_WORKER_ENABLED': 'false', 'DISABLE_BACKGROUND_TOKEN_REFRESH': 'true'}
         config['Env'] = [x for x in config.get('Env', []) if x.split('=', 1)[0] not in overrides]
@@ -169,7 +170,8 @@ def deploy(sha):
         return
     if set(old['NetworkSettings']['Networks']) != {NETWORK} or old['HostConfig'].get('PortBindings'):
         raise RuntimeError('Unexpected runtime network; deployment requires review')
-    if old['HostConfig'].get('Binds') != [f'{DATA}:/app/data']:
+    mounts = old.get('Mounts') or []
+    if len(mounts) != 1 or any(m.get('Type') != 'bind' or m.get('Source') != str(DATA) or m.get('Destination') != '/app/data' or not m.get('RW') for m in mounts):
         raise RuntimeError('Unexpected data mounts; deployment requires review')
     if any(old['Config'].get(key) != image['Config'].get(key) for key in ['Entrypoint', 'Cmd']):
         raise RuntimeError('Startup contract changed; deployment requires review')

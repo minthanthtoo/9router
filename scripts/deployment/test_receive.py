@@ -17,7 +17,7 @@ class DeploymentSafety(unittest.TestCase):
 
     def test_configuration_keeps_runtime_and_isolates_rehearsal(self):
         old = {'Config': {'Env': ['TOKEN=private', 'IMAGE_ADMIN_TEST_WORKER_ENABLED=true'], 'Cmd': ['node', 'custom-server.js']},
-               'HostConfig': {'Binds': ['/live:/app/data'], 'NetworkMode': 'live', 'RestartPolicy': {'Name': 'unless-stopped'}, 'PortBindings': {'80': []}}}
+               'HostConfig': {'Binds': ['/live:/app/data'], 'Mounts': [{'Source': '/live', 'Target': '/app/data'}], 'NetworkMode': 'live', 'RestartPolicy': {'Name': 'unless-stopped'}, 'PortBindings': {'80': []}}}
         original = copy.deepcopy(old)
         result = receive.configuration(old, 'ci-image', '/trial', rehearsal=True)
         self.assertEqual(old, original)
@@ -26,6 +26,7 @@ class DeploymentSafety(unittest.TestCase):
         self.assertEqual(result['HostConfig']['Binds'], ['/trial:/app/data'])
         self.assertEqual(result['HostConfig']['NetworkMode'], 'none')
         self.assertNotIn('PortBindings', result['HostConfig'])
+        self.assertNotIn('Mounts', result['HostConfig'])
         live = receive.configuration(old, 'ci-image', '/live')
         self.assertEqual(live['Env'], old['Config']['Env'])
         self.assertEqual(live['HostConfig']['Binds'], old['HostConfig']['Binds'])
@@ -93,6 +94,7 @@ class DeploymentSafety(unittest.TestCase):
                 sha = 'a' * 40
                 old = {'Image': 'old', 'Config': {'Entrypoint': ['/entrypoint.sh'], 'Cmd': ['node'], 'Env': []},
                        'HostConfig': {'Binds': [str(data) + ':/app/data'], 'RestartPolicy': {'Name': 'unless-stopped'}},
+                       'Mounts': [{'Type': 'bind', 'Source': str(data), 'Destination': '/app/data', 'RW': True}],
                        'NetworkSettings': {'Networks': {receive.NETWORK: {}}}}
                 image = {'Id': 'new', 'Config': {**old['Config'], 'Labels': {
                     'org.opencontainers.image.revision': sha,
