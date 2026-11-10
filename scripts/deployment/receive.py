@@ -35,13 +35,15 @@ class DockerConnection(http.client.HTTPConnection):
         self.sock.connect('/var/run/docker.sock')
 
 
-def docker(method, path, body=None):
+def docker(method, path, body=None, missing_ok=False):
     conn = DockerConnection('localhost', timeout=120)
     conn.request(method, '/v1.41' + path, json.dumps(body) if body is not None else None,
                  {'Content-Type': 'application/json'})
     response = conn.getresponse()
     raw = response.read()
     conn.close()
+    if missing_ok and response.status == 404:
+        return None
     if response.status >= 400:
         # Docker errors may contain runtime configuration; retain no response body.
         raise RuntimeError(f'Docker operation failed: {method} {path} ({response.status})')
@@ -195,7 +197,7 @@ def deploy(sha):
             if file_snapshot(trial) != files:
                 raise RuntimeError('Candidate changed stored files; release rejected')
         finally:
-            docker('DELETE', '/containers/' + test_name + '?force=true')
+            docker('DELETE', '/containers/' + test_name + '?force=true', missing_ok=True)
     if current_head() != sha:
         raise RuntimeError('Newer commit arrived during checks; release superseded')
     release = STATE / (sha + '-' + str(time.time_ns()))

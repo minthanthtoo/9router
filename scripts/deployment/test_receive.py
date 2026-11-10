@@ -112,7 +112,7 @@ class DeploymentSafety(unittest.TestCase):
                     'org.opencontainers.image.revision': sha,
                     'org.opencontainers.image.source': 'https://github.com/' + receive.REPOSITORY}}}
                 calls = []
-                def fake_docker(method, path, body=None):
+                def fake_docker(method, path, body=None, missing_ok=False):
                     calls.append((method, path))
                     if method == 'GET':
                         return image if path.startswith('/images/') else old

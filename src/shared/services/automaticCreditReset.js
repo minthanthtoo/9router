@@ -37,10 +37,22 @@ export async function prepareAutomaticCreditReset(connections, policy, model, { 
     .sort((a, b) => snapshots[a.id].credits.expiresAt - snapshots[b.id].credits.expiresAt);
   const blocked = [...held];
   for (const connection of matches) {
-    const snapshot = snapshots[connection.id];
-    const quotas = applicableRotationQuotas(snapshot, 'codex', model, now);
+    let snapshot = snapshots[connection.id];
+    let quotas = applicableRotationQuotas(snapshot, 'codex', model, now);
     // Positive allowance needs no redemption. Unknown allowance never justifies spending.
     if (!quotas.some(q => q.remaining === 0)) return { blocked };
+    // Re-read provider evidence immediately before an irreversible spend.
+    try {
+      readUsage ||= (await import('@/app/api/usage/[connectionId]/route.js')).GET;
+      readCredits ||= (await import('@/app/api/usage/[connectionId]/codex-reset-credits/route.js')).GET;
+      const context = { params: Promise.resolve({ connectionId: connection.id }) };
+      if (!(await readUsage(new Request('http://localhost/internal-quota-read'), context)).ok || !(await readCredits(new Request('http://localhost/internal-credit-read'), context)).ok) { blocked.push(connection.id); continue; }
+      const refreshed = await getProviderConnectionById(connection.id);
+      snapshot = (await readRotationSnapshots([refreshed]))[connection.id];
+      quotas = applicableRotationQuotas(snapshot, 'codex', model, Date.now());
+      if (!quotas.length || !quotas.some(q => q.remaining === 0)) return { blocked };
+      if (!resetCreditPriority(refreshed, snapshot, policy, { provider: 'codex', model })) { blocked.push(connection.id); continue; }
+    } catch { blocked.push(connection.id); continue; }
     const latest = await getProviderConnectionById(connection.id);
     const current = (await getSettings()).providerStrategies?.codex?.rotationSequence;
     if (!latest?.isActive || JSON.stringify(current) !== JSON.stringify(policy)) return { blocked };
