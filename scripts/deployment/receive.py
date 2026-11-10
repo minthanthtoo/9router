@@ -90,10 +90,13 @@ def snapshot(path):
             raise RuntimeError('Database integrity check failed')
         for (name,) in db.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%' and name != '_meta'"):
             quoted = '"' + name.replace('"', '""') + '"'
-            columns = [r[1] for r in db.execute('pragma table_info(' + quoted + ')')]
-            rows = db.execute('select * from ' + quoted).fetchall()
-            # Column hashes allow additive migrations while checking every prior value.
-            result[name] = {column: hashlib.sha256(json.dumps(sorted([repr(r[i]) for r in rows])).encode()).hexdigest()
+            info = list(db.execute('pragma table_info(' + quoted + ')'))
+            columns = [r[1] for r in info]
+            keys = [columns.index(r[1]) for r in sorted(info, key=lambda r: r[5]) if r[5]]
+            rows = db.execute('select ' + ('' if keys else 'rowid,') + '* from ' + quoted).fetchall()
+            keyed = [(tuple(r[i] for i in keys), r) if keys else ((r[0],), r[1:]) for r in rows]
+            # Keep row identity in every column hash; credentials must never swap accounts.
+            result[name] = {column: hashlib.sha256(json.dumps(sorted(repr((key, r[i])) for key, r in keyed)).encode()).hexdigest()
                             for i, column in enumerate(columns)}
     return result
 

@@ -51,6 +51,18 @@ class DeploymentSafety(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 receive.preserved(before, receive.snapshot(path))
 
+    def test_preservation_rejects_values_swapped_between_accounts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'data.sqlite'
+            with closing(sqlite3.connect(path)) as db, db:
+                db.execute('create table accounts(id integer primary key, credential text)')
+                db.executemany('insert into accounts values(?, ?)', [(1, 'first'), (2, 'second')])
+            before = receive.snapshot(path)
+            with closing(sqlite3.connect(path)) as db, db:
+                db.execute("update accounts set credential=case id when 1 then 'second' else 'first' end")
+            with self.assertRaises(RuntimeError):
+                receive.preserved(before, receive.snapshot(path))
+
     def test_idle_refuses_dispatched_or_active_work(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'data.sqlite'
