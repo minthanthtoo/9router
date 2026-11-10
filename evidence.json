@@ -1,0 +1,15 @@
+{
+  "purpose": "PR illustrations and DOM association check",
+  "inputPR": "decolua/9router#5553",
+  "inputHead": "0b2dfa624bc37f41a0b104137dabdf8723cff4cb",
+  "integrationPR": "minthanthtoo/9router#1",
+  "integrationHead": "abea785586b849eba6f43c20349688099a7a4720",
+  "capture": "Native Chrome; exact-head React components rendered in a local fixture; synthetic account and quota data; wrapper headings added for explanation",
+  "limits": "Illustrative saved states, not live provider capacity or production end-to-end proof. Browser focus styling may not be retained in screenshot capture.",
+  "sha256": {
+    "input-label.png": "62d22d50333a16c0cd5605dc879d7253c7e7150aae3cdebdaf3de4ae2ca42e6f",
+    "rotation-preview.png": "5632ff42cc000dbeda4b2b407783e7b749af4acd90f1ad32340c1ba889597a1b",
+    "image-recovery.png": "9f6963047c0d9740ea80bd495e9a6a2cbf702ed9e072bbb652cfa07a58791b51",
+    "input-evidence.json": "1765b7523e703d22f7165c40edb2bbdd4608982d91b32ce14692078c524dc5db"
+  }
+}

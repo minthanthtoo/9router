@@ -1,0 +1,15 @@
+{
+  "pass": true,
+  "results": [
+    {
+      "source": "Before",
+      "labelControl": null,
+      "inputId": "account-name"
+    },
+    {
+      "source": "After",
+      "labelControl": "account-name",
+      "inputId": "account-name"
+    }
+  ]
+}
