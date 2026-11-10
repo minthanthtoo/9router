@@ -146,3 +146,16 @@ test('Codex summaries and simple sorting honor declared weekly primary windows',
   const unknown={unknown:{quotas:parseQuotaData('codex',{quotas:{session:{used:0,total:100,quotaStatus:'unknown',windowSeconds:604800}}})}};
   assert.equal(getConnectionQuotaRemaining({id:'unknown'},unknown,'weekly'),null);
 });
+
+test('matching 0% accounts lead only with explicit automatic reset consent', () => {
+  const rows = [{id:'empty'}, {id:'ready'}, {id:'spent'}];
+  const data = {empty:snapshot(0), ready:snapshot(70), spent:snapshot(0)};
+  data.empty.credits = {availableCount:1, observedAt:now, expiresAt:now+86400000};
+  data.spent.credits = {availableCount:0, observedAt:now, expiresAt:now+3600000};
+  const config = {...policy([{key:'weekly-remaining',direction:'desc'}]),resetPriority:{enabled:true,days:3,weeklyBelow:30,autoReset:true}};
+  assert.deepEqual(evaluate(rows,data,config).candidates.map(c=>c.id),['empty']);
+  assert.deepEqual(evaluate(rows,data,config).waiting.map(r=>r.connection.id),['spent']);
+  config.resetPriority.autoReset=false;
+  assert.deepEqual(evaluate(rows,data,config).candidates.map(c=>c.id),['ready']);
+  assert.throws(()=>validateRotation({...config,resetPriority:{...config.resetPriority,autoReset:'yes'}},'codex'));
+});

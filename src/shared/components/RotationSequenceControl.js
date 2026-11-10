@@ -141,7 +141,7 @@ export default function RotationSequenceControl({ provider, initialSorts, compac
           </div>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" role="switch" checked={policy.enabled} disabled={locked} onChange={event => change({ ...policy, enabled: event.target.checked })} />Use sort sequence</label>
           <div className={`${styles.sortArea} quota-sort-area`}>
-           {provider==='codex'&&<ResetPriorityControl value={policy.resetPriority} disabled={locked} onChange={resetPriority=>change({...policy,resetPriority})} />}
+           {provider==='codex'&&<div className="shrink-0 border-r border-border pr-2"><ResetPriorityControl value={policy.resetPriority} disabled={locked} onChange={resetPriority=>change({...policy,resetPriority})} /></div>}
            <div className="min-w-0 flex-1"><QuotaSortBar wrap sorts={policy.sorts} options={metrics} provider={provider} disabled={locked} hintId={`rotation-sort-hint-${provider}`} onChange={sorts=>change({...policy,sorts})} /></div>
           </div>
           <p id={`rotation-sort-hint-${provider}`} className="sr-only">Click to cycle lowest or earliest, highest or latest, then off. Each later sort partitions the preceding group.</p>

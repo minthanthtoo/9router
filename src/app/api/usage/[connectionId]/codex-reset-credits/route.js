@@ -1,7 +1,7 @@
 // Ensure proxyFetch is loaded to patch globalThis.fetch
 import "open-sse/index.js";
 
-import { recordRotationCredits, invalidateRotationSnapshot } from "@/lib/db/repos/providerRotationRepo.js";
+import { recordRotationCredits, invalidateRotationSnapshot, claimCreditReset, finishCreditReset } from "@/lib/db/repos/providerRotationRepo.js";
 import { getProviderConnectionById } from "@/lib/localDb";
 import { consumeCodexRateLimitResetCredit, getCodexRateLimitResetCredits } from "open-sse/services/usage.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
@@ -121,8 +121,8 @@ export async function GET(_request, { params }) {
   }
 }
 
-export async function POST(request, { params }) {
-  let connection, resetStarted = false;
+export async function POST(request, { params, automaticCycle = null }) {
+  let connection, resetStarted = false, redeemRequestId = null;
   try {
     const { connectionId } = await params;
     const resolved = await getCodexConnection(connectionId);
@@ -137,7 +137,8 @@ export async function POST(request, { params }) {
     }
 
     // Server-generated redeem id prevents client-controlled replay
-    const redeemRequestId = crypto.randomUUID();
+    redeemRequestId = await claimCreditReset(connection.id, automaticCycle);
+    if (!redeemRequestId) return Response.json({ reset: false, code: 'reset_pending_review', message: 'A previous reset is pending or already attempted for this quota cycle.' }, { status: 409 });
     await invalidateRotationSnapshot(connection.id, true);
     resetStarted = true;
     let consumeResult = await consumeCodexRateLimitResetCredit(connection.accessToken, redeemRequestId, proxyOptions);
@@ -152,8 +153,10 @@ export async function POST(request, { params }) {
       }
     }
 
+    await finishCreditReset(redeemRequestId, consumeResult.ok ? 'confirmed' : consumeResult.noCredit || [400, 401, 403, 409, 422, 429].includes(consumeResult.status) ? 'rejected' : 'unknown', consumeResult.code);
     return getResponseForConsumeResult(consumeResult, redeemRequestId);
   } catch (error) {
+    if (redeemRequestId) { try { await finishCreditReset(redeemRequestId, "unknown", "response_unconfirmed"); } catch {} }
     const provider = connection?.provider ?? "unknown";
     console.warn(`[Codex Reset Credits] ${provider}: ${error.message}`);
     return Response.json({ error: error.message }, { status: 500 });

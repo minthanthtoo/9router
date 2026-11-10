@@ -282,6 +282,16 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       ? allConnections.filter((connection) => Boolean(geminiQuotaProjectId(connection)))
       : allConnections;
     const textPolicies = options?.capability === 'chat' ? await readTextModelPolicies(connections) : null;
+    const automaticResetBlocked = new Set();
+    let automaticResetReady = null;
+    if (providerId === 'codex' && options?.capability === 'chat' && !options?.peekOnly) {
+      const policy = (await getSettings()).providerStrategies?.codex?.rotationSequence;
+      const candidates = connections.filter(c => !excludeSet.has(c.id) && !textModelPermissionReason(c, model, textPolicies?.get(c.id)));
+      const { prepareAutomaticCreditReset } = await import('@/shared/services/automaticCreditReset.js');
+      const prepared = await prepareAutomaticCreditReset(candidates, policy, options.requestedModel || model);
+      prepared.blocked.forEach(id => automaticResetBlocked.add(id));
+      automaticResetReady = prepared.readyId || null;
+    }
     log.debug("AUTH", `${provider} | total connections: ${allConnections.length}, quota-ready: ${connections.length}, excludeIds: ${excludeSet.size > 0 ? [...excludeSet].join(",") : "none"}, model: ${model || "any"}`);
 
     if (allConnections.length === 0) {
@@ -372,6 +382,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
 
     // Filter out model-locked, excluded, and Antigravity quota-exhausted connections.
     let availableConnections = connections.filter(c => {
+      if (automaticResetBlocked.has(c.id)) return false;
       if (excludeSet.has(c.id)) return false;
       if (textPolicies && textModelPermissionReason(c, requestedModel, textPolicies.get(c.id))) return false;
       if (isModelLockActive(c, model)) return false;
@@ -496,6 +507,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     if (probeCandidate && availableConnections.includes(probeCandidate)) {
       connection = probeCandidate;
     }
+    if (!connection && automaticResetReady) connection = availableConnections.find(c => c.id === automaticResetReady);
     // Pin to preferred connection if specified and available
     if (!connection && preferredConnectionId) {
       connection = availableConnections.find((c) => c.id === preferredConnectionId);

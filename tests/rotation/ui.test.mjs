@@ -42,7 +42,7 @@ test('editor separates activation, auto-previews cached data, ignores stale resp
  assert.equal(calls.some(c=>c.method==='PATCH'||c.body?.action==='refresh'),false);
  fireEvent.click(screen.getByRole('button',{name:'Short window left %: Off'}));
  assert.equal(screen.getByRole('switch',{name:'Use sort sequence'}).checked,false);
- fireEvent.click(screen.getByRole('button',{name:'Codex reset priority: off'}));fireEvent.click(screen.getByRole('switch',{name:'Reset credits first'}));fireEvent.click(screen.getAllByRole('button',{name:'Done'}).find(button=>button.closest('[role="dialog"]')?.getAttribute('aria-label')!=='codex account rotation'));assert.equal(screen.getByRole('switch',{name:'Use sort sequence'}).checked,false);
+ fireEvent.click(screen.getByRole('button',{name:'Codex credit priority: off'}));fireEvent.click(screen.getByRole('switch',{name:'Prioritize expiring credits'}));fireEvent.click(screen.getAllByRole('button',{name:'Done'}).find(button=>button.closest('[role="dialog"]')?.getAttribute('aria-label')!=='codex account rotation'));assert.equal(screen.getByRole('switch',{name:'Use sort sequence'}).checked,false);
 
  await waitFor(()=>assert.ok(screen.getByText('23 ready')),{timeout:10000});
  assert.ok(calls.some(c=>c.body?.action==='preview'));assert.equal(calls.some(c=>c.body?.action==='refresh'),false);
@@ -65,7 +65,7 @@ test('editor separates activation, auto-previews cached data, ignores stale resp
  fail=true;fireEvent.change(screen.getByRole('combobox',{name:'Model'}),{target:{value:'fail-model'}});
  await waitFor(()=>assert.ok(screen.getByText('Preview failed')),{timeout:10000});fireEvent.click(screen.getByRole('switch'));
  assert.equal(screen.getByRole('button',{name:'Disable sequence'}).disabled,false);
- cleanup();render(React.createElement(Control,{provider:'claude'}));fireEvent.click(screen.getByRole('button',{name:'Edit claude rotation sequence'}));await waitFor(()=>assert.ok(screen.getByRole('switch',{name:'Use sort sequence'})));assert.equal(screen.queryByRole('button',{name:/Codex reset priority/}),null);cleanup();
+ cleanup();render(React.createElement(Control,{provider:'claude'}));fireEvent.click(screen.getByRole('button',{name:'Edit claude rotation sequence'}));await waitFor(()=>assert.ok(screen.getByRole('switch',{name:'Use sort sequence'})));assert.equal(screen.queryByRole('button',{name:/Codex credit priority/}),null);cleanup();
 });
 
 test('board preserves account identity and explanation through compact walkthrough, shows all windows and invalidates stale context',async()=>{

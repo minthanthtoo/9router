@@ -32,7 +32,7 @@ export function validateRotation(value, provider) {
     seen.add(sort.key); return { key: sort.key, direction: sort.direction, division: sort.division };
   });
   const priority = value.resetPriority;
-  if (!keysOnly(priority, ['enabled', 'days', 'weeklyBelow']) || typeof priority.enabled !== 'boolean' || !Number.isInteger(priority.days) || priority.days < 1 || priority.days > 30 || !(priority.weeklyBelow === null || typeof priority.weeklyBelow === 'number' && Number.isFinite(priority.weeklyBelow) && priority.weeklyBelow >= 0 && priority.weeklyBelow <= 100) || priority.enabled && provider !== 'codex') throw new TypeError('Invalid reset-credit priority');
+  if (!keysOnly(priority, ['enabled', 'days', 'weeklyBelow', 'autoReset']) || typeof priority.enabled !== 'boolean' || !Number.isInteger(priority.days) || priority.days < 1 || priority.days > 30 || !(priority.weeklyBelow === null || typeof priority.weeklyBelow === 'number' && Number.isFinite(priority.weeklyBelow) && priority.weeklyBelow >= 0 && priority.weeklyBelow <= 100) || priority.autoReset !== undefined && typeof priority.autoReset !== 'boolean' || priority.enabled && provider !== 'codex') throw new TypeError('Invalid reset-credit priority');
   if (value.enabled && !sorts.length && !priority.enabled) throw new TypeError('Choose a sort or reset priority');
   return { version: ROTATION_VERSION, enabled: value.enabled, sorts, resetPriority: { ...priority } };
 }
@@ -134,6 +134,14 @@ export function rotationValue(snapshot, metric, provider, model, now) {
   const values = applicableRotationQuotas(snapshot, provider, model, now).filter(quota => quota.window === metric.window).map(quota => metric.kind === 'remaining' ? quota.remaining : quota.resetAt).filter(value => value !== null);
   return values.length ? Math.min(...values) : null;
 }
+export function resetCreditPriority(connection, snapshot, policy, { provider, model = '', now = Date.now() }) {
+  if (!policy?.enabled || !policy.resetPriority?.enabled || !scopeMatches(provider, 'codex:main', model)) return false;
+  const credits = snapshot?.credits;
+  const fresh = snapshot?.provider === provider && Number.isFinite(snapshot.observedAt) && now >= snapshot.observedAt && now - snapshot.observedAt <= SNAPSHOT_MAX_AGE_MS;
+  const weekly = rotationValue(snapshot, { window: 'weekly', kind: 'remaining' }, provider, model, now);
+  return Boolean(fresh && credits?.availableCount > 0 && Number.isFinite(credits.observedAt) && now >= credits.observedAt && now - credits.observedAt <= SNAPSHOT_MAX_AGE_MS && credits.expiresAt > now && credits.expiresAt <= now + policy.resetPriority.days * 86400000 && (policy.resetPriority.weeklyBelow === null || weekly !== null && weekly <= policy.resetPriority.weeklyBelow));
+}
+
 export function evaluateRotation(connections, snapshots, policy, { provider, model = '', now = Date.now(), onStep }) {
   policy = validateRotation(policy, provider);
   const metrics = rotationMetrics(provider), rules = policy.sorts.map(sort => ({ ...metrics.find(metric => metric.key === sort.key), ...sort }));
@@ -141,29 +149,28 @@ export function evaluateRotation(connections, snapshots, policy, { provider, mod
     const snapshot = snapshots[connection.id];
     const fresh = snapshot?.provider === provider && Number.isFinite(snapshot.observedAt) && now >= snapshot.observedAt && now - snapshot.observedAt <= SNAPSHOT_MAX_AGE_MS;
     const expiry = fresh && snapshot.credits?.availableCount > 0 && Number.isFinite(snapshot.credits.observedAt) && now >= snapshot.credits.observedAt && now - snapshot.credits.observedAt <= SNAPSHOT_MAX_AGE_MS ? snapshot.credits.expiresAt : null;
-    const weekly = rotationValue(snapshot, { window: 'weekly', kind: 'remaining' }, provider, model, now);
-    const urgent = policy.enabled && policy.resetPriority.enabled && scopeMatches(provider, 'codex:main', model) && expiry > now && expiry <= now + policy.resetPriority.days * 86400000 && (policy.resetPriority.weeklyBelow === null || weekly !== null && weekly <= policy.resetPriority.weeklyBelow);
+    const urgent = resetCreditPriority(connection, snapshot, policy, { provider, model, now });
     return { connection, values: rules.map(rule => rotationValue(snapshot, rule, provider, model, now)), urgent, expiry, fresh };
   });
   const segments = [], waiting = [];
   onStep?.({ initial: true, rows, urgent: rows.filter(row => row.urgent).sort((a, b) => a.expiry - b.expiry), regular: rows.filter(row => !row.urgent) });
-  const descend = (group, depth, path, boundaries) => {
+  const descend = (group, depth, path, boundaries, resetPriority = false) => {
     const rule = rules[depth];
-    const skipped = !rule || group.every(row => row.values[depth] === null);
-    const ordered = skipped ? group : [...group].sort((a, b) => a.values[depth] === b.values[depth] ? 0 : a.values[depth] === null ? 1 : b.values[depth] === null ? -1 : (a.values[depth] - b.values[depth]) * (rule.direction === 'asc' ? 1 : -1));
+    const skipped = resetPriority || !rule || group.every(row => row.values[depth] === null);
+    const ordered = resetPriority ? group : skipped ? group : [...group].sort((a, b) => a.values[depth] === b.values[depth] ? 0 : a.values[depth] === null ? 1 : b.values[depth] === null ? -1 : (a.values[depth] - b.values[depth]) * (rule.direction === 'asc' ? 1 : -1));
     // Demote after the first ordering, before a split can let exhausted rows change its boundary.
-    const waitingRows = depth === 0 ? ordered.filter(row => rotationValue(snapshots[row.connection.id], { window: 'session', kind: 'remaining' }, provider, model, now) === 0) : [];
+    const waitingRows = depth === 0 ? ordered.filter(row => !(row.urgent && policy.resetPriority.autoReset) && rotationValue(snapshots[row.connection.id], { window: 'session', kind: 'remaining' }, provider, model, now) === 0) : [];
     waiting.push(...waitingRows.map(row => ({ ...row, reason: 'Short window exhausted' })));
     const ready = waitingRows.length ? ordered.filter(row => !waitingRows.includes(row)) : ordered;
-    const children = rule && !skipped && depth + 1 < rules.length && ready.length > 1 ? partitionRotationRows(ready, depth, rule.direction, rules[depth + 1].division).map(({ rows, detail }, index) => ({ rows, path: `${path}.${index + 1}`, boundaries: [...boundaries, { ...detail, label: rule.label, kind: rule.kind, key: rule.key, direction: rule.direction }] })) : null;
-    onStep?.({ depth, path, rows: ordered, ready, waiting: waitingRows, boundaries, children, skipped });
+    const children = !resetPriority && rule && !skipped && depth + 1 < rules.length && ready.length > 1 ? partitionRotationRows(ready, depth, rule.direction, rules[depth + 1].division).map(({ rows, detail }, index) => ({ rows, path: `${path}.${index + 1}`, boundaries: [...boundaries, { ...detail, label: rule.label, kind: rule.kind, key: rule.key, direction: rule.direction }] })) : null;
+    onStep?.({ depth, path, rows: ordered, ready, waiting: waitingRows, boundaries, children, skipped, ...(resetPriority ? { note: 'Soonest credit expiry first' } : {}) });
     if (children) children.forEach(child => descend(child.rows, depth + 1, child.path, child.boundaries));
-    else if (rule && depth + 1 < rules.length) descend(ready, depth + 1, path, boundaries);
+    else if (!resetPriority && rule && depth + 1 < rules.length) descend(ready, depth + 1, path, boundaries);
     else if (ready.length) segments.push({ key: path, rows: ready, boundaries });
   };
   if (!policy.enabled) { if (rows.length) segments.push({ key: 'regular', rows, boundaries: [] }); }
   else {
-    descend(rows.filter(row => row.urgent).sort((a, b) => a.expiry - b.expiry), 0, 'reset', []);
+    descend(rows.filter(row => row.urgent).sort((a, b) => a.expiry - b.expiry), 0, 'reset', [], true);
     descend(rows.filter(row => !row.urgent), 0, 'regular', []);
   }
   const hasEvidence = rows.some(row => row.urgent || row.values.some(value => value !== null));

@@ -91,3 +91,32 @@ export async function chooseSequenceConnection(connections, { provider, model, p
     return next;
   });
 }
+
+export async function claimCreditReset(connectionId, cycle = null) {
+  const db = await getAdapter();
+  return immediate(db, () => {
+    if (cycle) {
+      const policy = readPolicy(db, 'codex').policy;
+      if (!policy.enabled || !policy.resetPriority?.enabled || policy.resetPriority.autoReset !== true) return null;
+    }
+    if (db.get("SELECT id FROM providerCreditResetAttempts WHERE connectionId=? AND state IN ('pending','unknown','confirmed')", [connectionId])) return null;
+    if (cycle && db.get('SELECT id FROM providerCreditResetAttempts WHERE connectionId=? AND cycle=?', [connectionId, cycle])) return null;
+    const id = globalThis.crypto.randomUUID();
+    db.run('INSERT INTO providerCreditResetAttempts(id,connectionId,cycle,state,createdAt) VALUES(?,?,?,?,?)', [id, connectionId, cycle, 'pending', Date.now()]);
+    return id;
+  });
+}
+export async function finishCreditReset(id, state, code) {
+  if (!['confirmed', 'rejected', 'unknown'].includes(state)) throw new TypeError('Invalid reset outcome');
+  const db = await getAdapter();
+  db.run("UPDATE providerCreditResetAttempts SET state=?,result=? WHERE id=? AND state='pending'", [state, code || null, id]);
+}
+
+export async function readCreditResetHolds(connections) {
+  const db = await getAdapter(), ids = new Set(connections.map(c => c.id));
+  return db.all("SELECT id,connectionId,state,createdAt FROM providerCreditResetAttempts WHERE state IN ('pending','unknown','confirmed')").filter(row => ids.has(row.connectionId));
+}
+export async function completeCreditResetRecovery(id) {
+  const db = await getAdapter();
+  db.run("UPDATE providerCreditResetAttempts SET state='recovered' WHERE id=? AND state='confirmed'", [id]);
+}

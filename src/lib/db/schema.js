@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -417,6 +417,7 @@ export const TABLES = {
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_iqlp_one_open_scope ON imageQuotaLearningPredictions(provider, identityHash, identityGeneration, model, estimatorVersion) WHERE outcome = 'open'",
     ],
   },
+  providerCreditResetAttempts: { columns: { id: "TEXT PRIMARY KEY", connectionId: "TEXT NOT NULL", cycle: "TEXT", state: "TEXT NOT NULL", createdAt: "INTEGER NOT NULL", result: "TEXT" }, indexes: [] },
   providerRotationSnapshots: { columns: { connectionId: "TEXT PRIMARY KEY", fingerprint: "TEXT NOT NULL", data: "TEXT NOT NULL" }, indexes: [] },
   providerRotationCursors: { columns: { scope: "TEXT PRIMARY KEY", connectionId: "TEXT NOT NULL", useCount: "INTEGER NOT NULL" }, indexes: [] },
   aurixImageRoutingCursors: {columns:{scope:"TEXT PRIMARY KEY",connectionId:"TEXT NOT NULL",useCount:"INTEGER NOT NULL",updatedAt:"TEXT NOT NULL"},indexes:[]},

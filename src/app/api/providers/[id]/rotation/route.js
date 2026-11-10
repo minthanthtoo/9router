@@ -3,7 +3,7 @@ import {getImageQuotaState,getImageSupplierLoads} from '@/lib/db/repos/imageQuot
 import {resolveImageRouting,resolveImageAccountPreference,resolveImageSelection,validateImageRouting} from '@/shared/utils/imageRouting.mjs';
 import {selectImageRotation} from '@/lib/db/repos/imageRoutingRepo.js';
 import { getProviderConnections, getSettings } from '@/lib/localDb';
-import { readRotationPolicy, saveRotationPolicy, readRotationSnapshots, chooseSequenceConnection } from '@/lib/db/repos/providerRotationRepo.js';
+import { readRotationPolicy, saveRotationPolicy, readRotationSnapshots, chooseSequenceConnection, readCreditResetHolds } from '@/lib/db/repos/providerRotationRepo.js';
 import { emptyRotation, rotationMetrics, validateRotation, legacyRotationNext, applicableRotationQuotas } from '@/shared/utils/rotationSequence.mjs';
 import { rotationPreviewInfo, rotationStages, rotationMeasurements, quotaScopeSummary } from '@/shared/utils/rotationPreview.mjs';
 import { rotationPool } from '@/sse/services/providerRotation.js';
@@ -34,7 +34,8 @@ async function inspect(provider, policy, model, draftImageRule = null) {
   if(image)policy=resolveImageAccountPreference(imageRule,policy,provider);
   const events = [];
   const textPolicies = image ? null : await readTextModelPolicies(connections);
-  const pool = rotationPool(connections, snapshots, policy, { provider, model, lockModel, now, imageStates, quotaAdmission: image, textPolicies, onStep: event => events.push(event) });
+  const resetHolds = provider === 'codex' ? await readCreditResetHolds(connections) : [];
+  const pool = rotationPool(connections, snapshots, policy, { resetHolds, provider, model, lockModel, now, imageStates, quotaAdmission: image, textPolicies, onStep: event => events.push(event) });
   const {strategy,stickyRequests} = resolveImageSelection(imageRule,override,settings);
   let next = policy.enabled && pool.hasEvidence ? strategy !== 'round-robin' ? pool.candidates[0] : await chooseSequenceConnection(pool.candidates, { provider, model, policy, stickyRequests, peekOnly: true }) : legacyRotationNext(pool.ranked.map(row => row.connection), strategy, stickyRequests);
   if(image){
@@ -45,7 +46,7 @@ async function inspect(provider, policy, model, draftImageRule = null) {
   const label = connection => connection.name || connection.displayName || connection.email || connection.id.slice(0, 8);
   return {
     ...rotationPreviewInfo(pool, snapshots, policy, { provider, model, now }), stages: rotationStages(events, policy), model, sorts: policy.sorts, policyEnabled: policy.enabled, resetPriorityEnabled: policy.resetPriority.enabled, metrics: rotationMetrics(provider), observedAt: now, strategy, stickyRequests, total: connections.length, eligible: pool.ranked.length, staleCount: pool.staleCount, fallback: !policy.enabled || !pool.hasEvidence, nextId: next?.id || null,
-    rows: [...pool.segments, ...(pool.waiting.length ? [{ rows: pool.waiting, boundaries: [], waiting: true }] : [])].flatMap((segment, index) => segment.rows.map(row => ({ id: row.connection.id, name: label(row.connection), segment: index + 1, waiting: Boolean(segment.waiting), reason: row.reason || null, priority: row.urgent, expiry: row.urgent ? row.expiry : null, constraints: applicableRotationQuotas(snapshots[row.connection.id], provider, model, now), measurements: rotationMeasurements(snapshots[row.connection.id], provider, model, now), scope: quotaScopeSummary(snapshots[row.connection.id], provider, model, now), values: row.values, fresh: row.fresh, observedAt: snapshots[row.connection.id]?.observedAt || null, boundaries: segment.boundaries }))),
+    rows: [...pool.segments, ...(pool.waiting.length ? [{ rows: pool.waiting, boundaries: [], waiting: true }] : [])].flatMap((segment, index) => segment.rows.map(row => ({ id: row.connection.id, name: label(row.connection), segment: index + 1, waiting: Boolean(segment.waiting), reason: row.reason || null, priority: row.urgent, resetRequired: Boolean(row.urgent && policy.resetPriority.autoReset && applicableRotationQuotas(snapshots[row.connection.id], provider, model, now).some(q => q.remaining === 0)), expiry: row.urgent ? row.expiry : null, constraints: applicableRotationQuotas(snapshots[row.connection.id], provider, model, now), measurements: rotationMeasurements(snapshots[row.connection.id], provider, model, now), scope: quotaScopeSummary(snapshots[row.connection.id], provider, model, now), values: row.values, fresh: row.fresh, observedAt: snapshots[row.connection.id]?.observedAt || null, boundaries: segment.boundaries }))),
     admission: pool.admission || null,
     blocked: pool.blocked.map(row => ({ id: row.connection.id, name: label(row.connection), reason: row.reason, gate: row.gate || null })),
   };
