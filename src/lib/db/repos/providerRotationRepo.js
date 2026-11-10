@@ -92,12 +92,12 @@ export async function chooseSequenceConnection(connections, { provider, model, p
   });
 }
 
-export async function claimCreditReset(connectionId, cycle = null) {
+export async function claimCreditReset(connectionId, cycle = null, expectedPolicy = null) {
   const db = await getAdapter();
   return immediate(db, () => {
     if (cycle) {
       const policy = readPolicy(db, 'codex').policy;
-      if (!policy.enabled || !policy.resetPriority?.enabled || policy.resetPriority.autoReset !== true) return null;
+      if (!policy.enabled || !policy.resetPriority?.enabled || policy.resetPriority.autoReset !== true || expectedPolicy && rotationRevision(policy) !== rotationRevision(expectedPolicy)) return null;
     }
     if (db.get("SELECT id FROM providerCreditResetAttempts WHERE connectionId=? AND state IN ('pending','unknown','confirmed')", [connectionId])) return null;
     if (cycle && db.get('SELECT id FROM providerCreditResetAttempts WHERE connectionId=? AND cycle=?', [connectionId, cycle])) return null;

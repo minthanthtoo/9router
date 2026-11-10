@@ -286,7 +286,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     let automaticResetReady = null;
     if (providerId === 'codex' && options?.capability === 'chat' && !options?.peekOnly) {
       const policy = (await getSettings()).providerStrategies?.codex?.rotationSequence;
-      const candidates = connections.filter(c => !excludeSet.has(c.id) && !textModelPermissionReason(c, model, textPolicies?.get(c.id)));
+      const candidates = connections.filter(c => !excludeSet.has(c.id) && (!isModelLockActive(c, model) || Number(c.errorCode) === 429) && !textModelPermissionReason(c, model, textPolicies?.get(c.id)));
       const { prepareAutomaticCreditReset } = await import('@/shared/services/automaticCreditReset.js');
       const prepared = await prepareAutomaticCreditReset(candidates, policy, options.requestedModel || model);
       prepared.blocked.forEach(id => automaticResetBlocked.add(id));

@@ -49,6 +49,7 @@ test('durable ledger serializes manual and automated attempts and never replays 
  globalThis._dbAdapter={instance:{driver:'node:sqlite',get:(s,p=[])=>sqlite.prepare(s).get(...p),all:(s,p=[])=>sqlite.prepare(s).all(...p),run:(s,p=[])=>sqlite.prepare(s).run(...p),exec:s=>sqlite.exec(s)},logged:true};
  try {
   const repo=await import('../../src/lib/db/repos/providerRotationRepo.js');
+  assert.equal(await repo.claimCreditReset('account','cycle',{enabled:false}),null);
   const first=await repo.claimCreditReset('account','cycle');assert.ok(first);
   assert.equal(await repo.claimCreditReset('account','cycle'),null);assert.equal(await repo.claimCreditReset('account'),null);
   await repo.finishCreditReset(first,'unknown','timeout');assert.equal(await repo.claimCreditReset('account','new-cycle'),null);

@@ -121,7 +121,7 @@ export async function GET(_request, { params }) {
   }
 }
 
-export async function POST(request, { params, automaticCycle = null }) {
+export async function POST(request, { params, automaticCycle = null, automaticPolicy = null }) {
   let connection, resetStarted = false, redeemRequestId = null;
   try {
     const { connectionId } = await params;
@@ -137,7 +137,7 @@ export async function POST(request, { params, automaticCycle = null }) {
     }
 
     // Server-generated redeem id prevents client-controlled replay
-    redeemRequestId = await claimCreditReset(connection.id, automaticCycle);
+    redeemRequestId = await claimCreditReset(connection.id, automaticCycle, automaticPolicy);
     if (!redeemRequestId) return Response.json({ reset: false, code: 'reset_pending_review', message: 'A previous reset is pending or already attempted for this quota cycle.' }, { status: 409 });
     await invalidateRotationSnapshot(connection.id, true);
     resetStarted = true;

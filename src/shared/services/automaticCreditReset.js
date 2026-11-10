@@ -45,7 +45,7 @@ export async function prepareAutomaticCreditReset(connections, policy, model, { 
     if (!latest?.isActive || JSON.stringify(current) !== JSON.stringify(policy)) return { blocked };
     const cycle = JSON.stringify([snapshot.credits.expiresAt, snapshot.credits.availableCount,
       quotas.filter(q => q.remaining === 0).map(q => [q.id, q.window, q.resetAt]).sort()]);
-    const context = { params: Promise.resolve({ connectionId: connection.id }), automaticCycle: cycle };
+    const context = { params: Promise.resolve({ connectionId: connection.id }), automaticCycle: cycle, automaticPolicy: policy };
     try {
       reset ||= (await import('@/app/api/usage/[connectionId]/codex-reset-credits/route.js')).POST;
       const response = await reset(new Request('http://localhost/internal-credit-reset', { method: 'POST' }), context);
