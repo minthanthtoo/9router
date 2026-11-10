@@ -1,0 +1,104 @@
+name: Check and deploy
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-build:
+    if: github.repository == 'minthanthtoo/9router'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            tests/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix tests
+      - name: Rotation and image workflow regressions
+        run: npm --prefix tests run test:rotation
+      - name: Deployment safety tests
+        run: python3 -m unittest discover -s scripts/deployment -p 'test_*.py'
+      - uses: docker/setup-buildx-action@v3
+      - name: Build production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: 9router-ci:${{ github.sha }}
+          build-args: APP_VERSION=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=production
+          cache-to: type=gha,mode=max,scope=production
+      - name: Check isolated image health
+        run: |
+          set -euo pipefail
+          trap 'docker rm -f ci-health >/dev/null 2>&1 || true' EXIT
+          docker run -d --name ci-health --network none \
+            -e IMAGE_ADMIN_TEST_WORKER_ENABLED=false \
+            -e DISABLE_BACKGROUND_TOKEN_REFRESH=true 9router-ci:"$GITHUB_SHA"
+          for attempt in {1..60}; do
+            if docker exec ci-health node -e "fetch('http://127.0.0.1:20128/api/health').then(async r=>process.exit(r.ok&&(await r.json()).ok===true?0:1)).catch(()=>process.exit(1))"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - name: Export checked image
+        if: github.event_name != 'pull_request'
+        run: docker save 9router-ci:"$GITHUB_SHA" | gzip -1 > "$RUNNER_TEMP/image.tar.gz"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: production-image
+          path: ${{ runner.temp }}/image.tar.gz
+          compression-level: 0
+          retention-days: 3
+
+  deploy:
+    needs: check-build
+    if: >-
+      github.repository == 'minthanthtoo/9router' &&
+      github.ref == 'refs/heads/master' &&
+      github.event_name != 'pull_request' &&
+      vars.AUTO_DEPLOY == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: production
+    concurrency:
+      group: production-9router
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: production-image
+          path: ${{ runner.temp }}/release
+      - name: Deploy checked image
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_KEY" && test -n "$KNOWN_HOSTS" && test -n "$DEPLOY_HOST"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy ~/.ssh/known_hosts
+          trap 'rm -f ~/.ssh/deploy' EXIT
+          ssh -T -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 \
+            "root@$DEPLOY_HOST" "$GITHUB_SHA" < "$RUNNER_TEMP/release/image.tar.gz"
