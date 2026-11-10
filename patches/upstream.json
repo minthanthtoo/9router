@@ -1,0 +1,115 @@
+{
+  "repository": "https://github.com/decolua/9router.git",
+  "branch": "master",
+  "base": "1339107e624d1ab150c6a0c2c2ee22caa7e9db2f",
+  "version": "0.5.116",
+  "features": [
+    {
+      "id": "quota-observations",
+      "status": "extract-from-integration",
+      "depends_on": [],
+      "entrypoints": [
+        "src/lib/db/repos/providerRotationRepo.js",
+        "src/shared/utils/rotationSequence.mjs"
+      ],
+      "tests": [
+        "tests/rotation/adapters.test.mjs",
+        "tests/rotation/scope.test.mjs",
+        "tests/rotation/refresh.test.mjs"
+      ]
+    },
+    {
+      "id": "account-rotation",
+      "status": "extract-from-integration",
+      "depends_on": [
+        "quota-observations"
+      ],
+      "entrypoints": [
+        "src/sse/services/providerRotation.js",
+        "src/shared/components/RotationSequenceControl.js"
+      ],
+      "tests": [
+        "tests/rotation/sequence.test.mjs",
+        "tests/rotation/preview.test.mjs",
+        "tests/rotation/waiting.test.mjs",
+        "tests/rotation/integration.test.mjs"
+      ]
+    },
+    {
+      "id": "image-quota-and-fallback",
+      "status": "extract-from-integration",
+      "depends_on": [
+        "quota-observations"
+      ],
+      "entrypoints": [
+        "src/sse/services/imageQuotaEligibility.js",
+        "open-sse/handlers/imageGenerationCore.js",
+        "src/lib/db/repos/imageQuotaRepo.js"
+      ],
+      "tests": [
+        "tests/rotation/fallback.test.mjs",
+        "tests/rotation/image-routing-policy.test.mjs",
+        "tests/rotation/image-repeat.test.mjs",
+        "tests/rotation/held-inspection.test.mjs"
+      ]
+    },
+    {
+      "id": "quota-cards-and-controls",
+      "status": "extract-from-integration",
+      "depends_on": [
+        "account-rotation",
+        "image-quota-and-fallback"
+      ],
+      "entrypoints": [
+        "src/app/(dashboard)/dashboard/quota/ImageCardModelGroup.js",
+        "src/shared/components/RotationPreviewExplorer.js"
+      ],
+      "tests": [
+        "tests/rotation/card-models.test.mjs",
+        "tests/rotation/ui.test.mjs",
+        "tests/rotation/image-controls-ui.test.mjs"
+      ]
+    },
+    {
+      "id": "codex-consented-reset",
+      "status": "committed-dependent-feature",
+      "depends_on": [
+        "account-rotation"
+      ],
+      "entrypoints": [
+        "src/shared/services/automaticCreditReset.js",
+        "src/shared/components/ResetPriorityControl.js",
+        "src/lib/db/migrations/020-credit-reset-attempts.js"
+      ],
+      "tests": [
+        "tests/rotation/automatic-reset.test.mjs",
+        "tests/rotation/sequence.test.mjs"
+      ]
+    },
+    {
+      "id": "fork-deployment",
+      "status": "fork-only",
+      "depends_on": [],
+      "entrypoints": [
+        ".github/workflows/production.yml",
+        "scripts/deployment/receive.py"
+      ],
+      "tests": [
+        "scripts/deployment/test_receive.py"
+      ]
+    },
+    {
+      "id": "patch-maintenance",
+      "status": "fork-only",
+      "depends_on": [],
+      "entrypoints": [
+        "docs/PATCH_MAINTENANCE.md",
+        "scripts/patches/export.py",
+        ".github/workflows/patch-replay.yml"
+      ],
+      "tests": [
+        "scripts/patches/test_export.py"
+      ]
+    }
+  ]
+}
