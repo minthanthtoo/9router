@@ -4,7 +4,7 @@ import {resolveImageRouting,resolveImageAccountPreference,resolveImageSelection,
 import {selectImageRotation} from '@/lib/db/repos/imageRoutingRepo.js';
 import { getProviderConnections, getSettings } from '@/lib/localDb';
 import { readRotationPolicy, saveRotationPolicy, readRotationSnapshots, chooseSequenceConnection, readCreditResetHolds } from '@/lib/db/repos/providerRotationRepo.js';
-import { emptyRotation, rotationMetrics, validateRotation, legacyRotationNext, applicableRotationQuotas } from '@/shared/utils/rotationSequence.mjs';
+import { emptyRotation, rotationMetrics, validateRotation, legacyRotationNext, applicableRotationQuotas, scopeMatches } from '@/shared/utils/rotationSequence.mjs';
 import { rotationPreviewInfo, rotationStages, rotationMeasurements, quotaScopeSummary } from '@/shared/utils/rotationPreview.mjs';
 import { rotationPool } from '@/sse/services/providerRotation.js';
 import { refreshRotationSnapshots, startRotationSnapshotRefresh } from '@/shared/services/rotationSnapshotRefresh.js';
@@ -34,7 +34,7 @@ async function inspect(provider, policy, model, draftImageRule = null) {
   if(image)policy=resolveImageAccountPreference(imageRule,policy,provider);
   const events = [];
   const textPolicies = image ? null : await readTextModelPolicies(connections);
-  const resetHolds = provider === 'codex' && !image ? await readCreditResetHolds(connections) : [];
+  const resetHolds = provider === 'codex' && !image && scopeMatches(provider, 'codex:main', model) ? await readCreditResetHolds(connections) : [];
   const pool = rotationPool(connections, snapshots, policy, { resetHolds, provider, model, lockModel, now, imageStates, quotaAdmission: image, textPolicies, onStep: event => events.push(event) });
   const {strategy,stickyRequests} = resolveImageSelection(imageRule,override,settings);
   let next = policy.enabled && pool.hasEvidence ? strategy !== 'round-robin' ? pool.candidates[0] : await chooseSequenceConnection(pool.candidates, { provider, model, policy, stickyRequests, peekOnly: true }) : legacyRotationNext(pool.ranked.map(row => row.connection), strategy, stickyRequests);

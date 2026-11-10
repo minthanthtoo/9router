@@ -1,9 +1,10 @@
 import { getSettings, getProviderConnectionById, updateProviderConnection } from '@/lib/localDb';
 import { readRotationSnapshots, readCreditResetHolds, completeCreditResetRecovery } from '@/lib/db/repos/providerRotationRepo.js';
-import { applicableRotationQuotas, resetCreditPriority } from '@/shared/utils/rotationSequence.mjs';
+import { applicableRotationQuotas, resetCreditPriority, scopeMatches } from '@/shared/utils/rotationSequence.mjs';
 
 // Only real text dispatch invokes this; previews and background quota reads never spend credits.
 export async function prepareAutomaticCreditReset(connections, policy, model, { reset, readUsage, readCredits } = {}) {
+  if (!scopeMatches('codex', 'codex:main', model)) return { blocked: [] };
   async function refreshConfirmed(connection, attemptId) {
     readUsage ||= (await import('@/app/api/usage/[connectionId]/route.js')).GET;
     readCredits ||= (await import('@/app/api/usage/[connectionId]/codex-reset-credits/route.js')).GET;

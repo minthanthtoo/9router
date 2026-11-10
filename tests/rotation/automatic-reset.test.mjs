@@ -21,7 +21,7 @@ async function fixture({consent=true,uncertain=false,positive=false,holds=[]}={}
   b.onLoad({filter:/.*/,namespace:'route'},()=>({contents:'export const GET=()=>{throw Error("Unexpected provider read")};export const POST=()=>{throw Error("Unexpected provider write")}',loader:'js'}));
  }}]});
  const m=new Module(resolve(root,'tests/rotation/auto-fixture.cjs'));m.filename=resolve(root,'tests/rotation/auto-fixture.cjs');m._compile(result.outputFiles[0].text,m.filename);
- const run=()=>m.exports.prepareAutomaticCreditReset([connection],policy,'gpt-6-sol',{
+ const run=(model='gpt-6-sol')=>m.exports.prepareAutomaticCreditReset([connection],policy,model,{
   reset:async(_,ctx)=>{f.calls.push('reset');assert.ok(ctx.automaticCycle);if(uncertain)throw Error('timeout');return Response.json({reset:true,redeemRequestId:'attempt'})},
   readUsage:async()=>{f.calls.push('read-usage');f.data=quota(80);return Response.json({})},
   readCredits:async()=>{f.calls.push('read-credits');return Response.json({})},
@@ -69,4 +69,10 @@ test('preview distinguishes exhausted resettable accounts from uncertain resets 
  assert.equal(pending.blocked[0].reason,'Reset pending verification');
  const resettable=rotationPool([f.connection],{empty:f.data},f.policy,{provider:'codex',model:'gpt-6-sol'});
  assert.equal(resettable.candidates[0].id,'empty');
+});
+
+test('image and separate Codex allowance models never redeem or reconcile main reset credits',async()=>{
+ const {f,run}=await fixture({holds:[{connectionId:'empty',state:'confirmed',id:'old'}]});
+ assert.deepEqual(await run('gpt-image-2'),{blocked:[]});
+ assert.equal(f.calls.length,0);
 });
