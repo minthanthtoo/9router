@@ -40,7 +40,7 @@ describe("admin image test run recovery", () => {
     const closed = await runs.controlAdminImageRun(run.id, "close", held.revision);
     expect(closed.state).toBe("cancelled");
     expect(await runs.readUnresolvedImageTargets()).toMatchObject([
-      { connectionId: targetA.connectionId, model: targetA.model, runId: run.id },
+      { connectionId: targetA.connectionId, model: targetA.model, runId: run.id, createdAt: run.createdAt },
     ]);
     await expect(runs.assertImageTargetResolved(targetA.connectionId, targetA.model))
       .rejects.toMatchObject({ code: "target_outcome_unconfirmed" });

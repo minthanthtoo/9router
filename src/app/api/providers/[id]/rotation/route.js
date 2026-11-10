@@ -40,13 +40,14 @@ async function inspect(provider, policy, model, draftImageRule = null) {
   if(image){
     let candidates=policy.enabled&&pool.hasEvidence?pool.candidates:pool.ranked.map(row=>row.connection);
     if(imageStates&&strategy==='round-robin'&&candidates.length>1){const loads=await getImageSupplierLoads(candidates,provider),minimum=Math.min(...candidates.map(row=>loads.get(row.id)||0));candidates=candidates.filter(row=>(loads.get(row.id)||0)===minimum);}
-    next=imageRule&&strategy==='round-robin'?await selectImageRotation(candidates,{provider,model:lockModel,operation:imageRule?.operation||'generate',stickyRequests,peekOnly:true}):legacyRotationNext(candidates,strategy,stickyRequests);
+    next=strategy==='round-robin'?await selectImageRotation(candidates,{provider,model:lockModel,operation:imageRule?.operation||'generate',stickyRequests,peekOnly:true}):legacyRotationNext(candidates,strategy,stickyRequests);
   }
   const label = connection => connection.name || connection.displayName || connection.email || connection.id.slice(0, 8);
   return {
     ...rotationPreviewInfo(pool, snapshots, policy, { provider, model, now }), stages: rotationStages(events, policy), model, sorts: policy.sorts, policyEnabled: policy.enabled, resetPriorityEnabled: policy.resetPriority.enabled, metrics: rotationMetrics(provider), observedAt: now, strategy, stickyRequests, total: connections.length, eligible: pool.ranked.length, staleCount: pool.staleCount, fallback: !policy.enabled || !pool.hasEvidence, nextId: next?.id || null,
     rows: [...pool.segments, ...(pool.waiting.length ? [{ rows: pool.waiting, boundaries: [], waiting: true }] : [])].flatMap((segment, index) => segment.rows.map(row => ({ id: row.connection.id, name: label(row.connection), segment: index + 1, waiting: Boolean(segment.waiting), reason: row.reason || null, priority: row.urgent, expiry: row.urgent ? row.expiry : null, constraints: applicableRotationQuotas(snapshots[row.connection.id], provider, model, now), measurements: rotationMeasurements(snapshots[row.connection.id], provider, model, now), scope: quotaScopeSummary(snapshots[row.connection.id], provider, model, now), values: row.values, fresh: row.fresh, observedAt: snapshots[row.connection.id]?.observedAt || null, boundaries: segment.boundaries }))),
-    blocked: pool.blocked.map(row => ({ id: row.connection.id, name: label(row.connection), reason: row.reason })),
+    admission: pool.admission || null,
+    blocked: pool.blocked.map(row => ({ id: row.connection.id, name: label(row.connection), reason: row.reason, gate: row.gate || null })),
   };
 }
 function failure(error) { return reply({ error: error instanceof TypeError ? error.message : error.status ? error.message : 'Rotation request failed' }, error.status || (error instanceof TypeError ? 400 : 500)); }

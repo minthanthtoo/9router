@@ -279,11 +279,11 @@ test('waiting preview and routing agree without advancing cursors, including emp
   assert.equal(await getProviderCredentials('codex', null, 'gpt-6.1', { capability: 'chat' }), null);
   assert.deepEqual(db.all('SELECT * FROM providerRotationCursors'), before);
   assert.deepEqual(db.all('SELECT * FROM aurixImageRoutingCursors'), imageBefore);
-  // Separate image allowance uses the same waiting gate and keeps its independent cursor untouched.
+  // Image admission rejects exhausted subscription windows before ranking and leaves cursors untouched.
   for (const connection of active) await repo.recordRotationUsage(connection, { quotas: { image_gen_primary: { total: 100, used: 100, quotaKind: 'image_generation', limitId: 'image_gen', windowSeconds: 18000 } } }, Date.now() + 1000);
-  const imagePreview = (await (await route.POST(new Request('http://localhost', { method: 'POST', body: JSON.stringify({ action: 'preview', policy: unknown, model: 'gpt-image-1' }) }), params)).json()).preview;
-  assert.equal(imagePreview.waitingCount, 4); assert.equal(imagePreview.nextId, null);
-  assert.equal(await getProviderCredentials('codex', null, 'gpt-image-1', { capability: 'image_generation', imageOperation: 'generate', requestedModel: 'gpt-image-1' }), null);
+  const imagePreview = (await (await route.POST(new Request('http://localhost', { method: 'POST', body: JSON.stringify({ action: 'preview', policy: unknown, model: 'gpt-image-2.5' }) }), params)).json()).preview;
+  assert.equal(imagePreview.blocked.length, 4); assert.equal(imagePreview.admission[1].ready, 0); assert.equal(imagePreview.nextId, null);
+  assert.equal(await getProviderCredentials('codex', null, 'gpt-image-2.5', { capability: 'image_generation', imageOperation: 'generate', requestedModel: 'gpt-image-2.5' }), null);
   assert.deepEqual(db.all('SELECT * FROM aurixImageRoutingCursors'), imageBefore);
   assert.equal(outbound, 0);
 });
@@ -411,6 +411,48 @@ test('registry model kinds survive conflicting custom entries across cards, filt
  assert.equal(outbound,0);
 });
 
+test('image admission explains subscription first, then model holds, without borrowing unrelated text quota', () => {
+ const now=Date.now(),model='gpt-image-2';
+ const rows=['off','subscription','held','ready'].map(id=>({id,provider:'codex',isActive:id!=='off'}));
+ const snapshots=Object.fromEntries(rows.map(c=>[c.id,engine.normalizeRotationUsage('codex',{quotas:{
+  session:{used:100,total:100},
+  image_gen_primary:{used:c.id==='subscription'?100:20,total:100,quotaKind:'image_generation',limitId:'image_gen',windowSeconds:18000},
+ }},now)]));
+ const imageStates=new Map(rows.map(c=>[c.id,{blockingRows:c.id==='subscription'||c.id==='held'?[{retryAt:new Date(now+60000).toISOString()}]:[]}]));
+ const pool=rotationPool(rows,snapshots,config,{provider:'codex',model,now,imageStates,quotaAdmission:true});
+ assert.deepEqual(pool.admission.map(step=>[step.id,step.ready]),[['account',3],['subscription',2],['model',1]]);
+ assert.equal(pool.blocked.find(row=>row.connection.id==='subscription').gate,'subscription');
+ assert.equal(pool.blocked.find(row=>row.connection.id==='held').gate,'model');
+ assert.deepEqual(pool.ranked.map(row=>row.connection.id),['ready']);
+ snapshots.ready.quotas.filter(quota=>quota.scope==='codex:image').forEach(quota=>{quota.remaining=null;});
+ assert.equal(rotationPool(rows,snapshots,config,{provider:'codex',model,now,imageStates,quotaAdmission:true}).admission[1].unreported,1);
+});
+
+test('inherited image rotation has separate Generate/Edit cursors even without an image override', async () => {
+ const previous=await getSettings(),saved=await repo.readRotationPolicy('codex'),model='gpt-image-2';
+ try {
+  await repo.saveRotationPolicy('codex',engine.emptyRotation(),saved.revision);
+  await updateSettings({aurixImageRouting:{version:1,rules:[]},providerStrategies:{codex:{fallbackStrategy:'round-robin',stickyRoundRobinLimit:1}}});
+  const before=await Promise.all(connections.map(c=>getProviderConnectionById(c.id)));
+  for(const c of before)await repo.recordRotationUsage(c,{quotas:{image_gen_primary:{used:20,total:100,quotaKind:'image_generation',limitId:'image_gen',windowSeconds:18000}}});
+  const options={capability:'image_generation',imageOperation:'edit',requestedModel:model};
+  const first=await getProviderCredentials('codex',null,model,options);
+  const response=await route.POST(new Request('http://localhost',{method:'POST',body:JSON.stringify({action:'preview',policy:engine.emptyRotation(),model,imageRule:{operation:'edit',provider:'codex',model:'*',strategy:'provider',stickyRequests:1}})}),params);
+  const {preview}=await response.json();
+  const second=await getProviderCredentials('codex',null,model,options);
+  assert.notEqual(first.connectionId,second.connectionId);assert.equal(second.connectionId,preview.nextId);
+  const edit=db.get('SELECT * FROM aurixImageRoutingCursors WHERE scope=?',[JSON.stringify(['edit','codex',model])]);
+  assert.ok(edit);assert.equal(edit.connectionId,second.connectionId);
+  const generated=await getProviderCredentials('codex',null,model,{...options,imageOperation:'generate'});
+  assert.ok(generated);assert.deepEqual(db.get('SELECT * FROM aurixImageRoutingCursors WHERE scope=?',[JSON.stringify(['edit','codex',model])]),edit);
+  const after=await Promise.all(connections.map(c=>getProviderConnectionById(c.id)));
+  assert.deepEqual(after.map(c=>[c.lastUsedAt,c.consecutiveUseCount]),before.map(c=>[c.lastUsedAt,c.consecutiveUseCount]));
+ } finally {
+  await repo.saveRotationPolicy('codex',saved.policy,(await repo.readRotationPolicy('codex')).revision);
+  await updateSettings({aurixImageRouting:previous.aurixImageRouting,providerStrategies:{codex:{fallbackStrategy:previous.providerStrategies?.codex?.fallbackStrategy,stickyRoundRobinLimit:previous.providerStrategies?.codex?.stickyRoundRobinLimit}}});
+ }
+});
+
 test.after(() => { sqlite.close(); rmSync(directory, { recursive: true, force: true }); });
 
 test('late usage and credit replies cannot replace newer independently observed evidence',async()=>{
@@ -441,7 +483,8 @@ test('namespaced model quota exhaustion protects admission without enabling cust
  const snapshots={[c.id]:engine.normalizeRotationUsage(c.provider,{quotas:{'google/gemini-pro':{remainingPercentage:0}}},now)};
  for(const model of ['google/gemini-pro','gemini-cli/google/gemini-pro']){
   const pool=rotationPool([c],snapshots,engine.emptyRotation(),{provider:c.provider,model,now,quotaAdmission:true});
-  assert.equal(pool.ranked.length,0);assert.equal(pool.blocked[0].reason,'Quota exhausted');
+  assert.equal(pool.ranked.length,0);assert.equal(pool.blocked[0].reason,'Image quota wait');assert.equal(pool.blocked[0].gate,'model');
+  assert.equal(pool.admission[1].ready,1);assert.equal(pool.admission[2].ready,0);
  }
  assert.equal(rotationPool([c],snapshots,engine.emptyRotation(),{provider:c.provider,model:'other/gemini-pro',now,quotaAdmission:true}).ranked.length,1);
 });

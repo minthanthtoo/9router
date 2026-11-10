@@ -63,7 +63,7 @@ export function startRotationSnapshotRefresh() {
         } catch { failures.push(provider); }
       }
       state.lastError = failures.length ? `${failures.length} provider refreshes unavailable` : null;
-    } catch (error) { console.warn('[Rotation snapshots] Refresh unavailable:', error.message); }
+    } catch { state.lastError = 'Quota monitor unavailable'; console.warn('[Rotation snapshots] Refresh unavailable'); }
     finally { state.tick = false; if (!state.timer) state.nextDueAt = null; }
   };
   state.timer = setInterval(tick, 60000); state.timer.unref?.();
@@ -72,5 +72,5 @@ export function startRotationSnapshotRefresh() {
 
 export function rotationAutomationStatus(settings) {
  const providers=[...monitoringPolicies(settings).keys()];
- return {scope:'process',quotaReads:{configured:providers.length>0,running:Boolean(state.timer),inProgress:state.tick||state.jobs.size>0,providers,cadenceMs:60000,lastAttemptAt:state.lastAttemptAt||null,lastSuccessAt:state.lastSuccessAt||null,lastError:state.lastError||null,nextDueAt:state.timer?state.nextDueAt||null:null,heartbeatAt:state.heartbeatAt||null},passiveLearning:{mode:'recorded_traffic'},imageRecovery:{mode:'manual',scheduled:false}};
+ return {scope:'process',quotaReads:{checkedAt:Date.now(),disabled:process.env.DISABLE_ROTATION_SNAPSHOT_REFRESH==='1',configured:providers.length>0,running:Boolean(state.timer),inProgress:state.tick||state.jobs.size>0,providers,cadenceMs:60000,lastAttemptAt:state.lastAttemptAt||null,lastSuccessAt:state.lastSuccessAt||null,lastError:state.lastError||null,nextDueAt:state.timer?state.nextDueAt||null:null,heartbeatAt:state.heartbeatAt||null},passiveLearning:{mode:'recorded_traffic'},imageRecovery:{mode:'manual',scheduled:false}};
 }

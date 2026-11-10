@@ -25,7 +25,19 @@ export async function GET(request){
  const actor=await principal(request);if(!actor)return json({error:'dashboard_sign_in_required'},401);
  const q=new URL(request.url).searchParams;
  if([...q.keys()].some(key=>!['id','key'].includes(key))||q.get('id')&&!UUID.test(q.get('id'))||q.get('key')&&!/^[A-Za-z0-9._:-]{16,120}$/.test(q.get('key')))return json({error:'invalid_lookup'},422);
- try{return await result(await readAdminImageRun({id:q.get('id'),key:q.get('key'),principal:actor}));}catch(error){return fail(error);}
+ try{
+  const run=await readAdminImageRun({id:q.get('id'),key:q.get('key'),principal:actor});
+  if(!q.get('id')||!run)return await result(run);
+  const recovery=[];
+  for(const item of run.items.filter(item=>item.state==='unknown')){
+   const trace=await getImageRequestTrace({clientOperationId:item.operationId});
+   const submissions=(trace.requests||[]).flatMap(request=>request.submissions||[]);
+   recovery.push({operationId:item.operationId,model:item.model,createdAt:run.createdAt,
+    evidence:trace.truncated?'incomplete':submissions.length!==1?'not_confirmed':submissions[0].outcome==='outcome_unknown'||submissions[0].outcome==='in_flight'?'outcome_unknown':'recorded',
+    dispatchedAt:submissions.length===1?submissions[0].dispatched_at:null,httpStatus:submissions.length===1?submissions[0].http_status:null});
+  }
+  return json({schema:'admin_image_tests.v1',run,blockedTargets:await readUnresolvedImageTargets(),recovery});
+ }catch(error){return fail(error);}
 }
 export async function POST(request){
  const actor=await principal(request);if(!actor)return json({error:'dashboard_sign_in_required'},401);

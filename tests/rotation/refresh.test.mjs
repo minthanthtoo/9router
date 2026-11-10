@@ -38,3 +38,20 @@ test('future-dated cached evidence cannot suppress a fresh account read',async()
  const api=await fixture({connections:async()=>[{id:'clock'}],snapshots:async()=>({clock:{observedAt:future,credits:{observedAt:future}}}),usage:async()=>{calls++;return Response.json({quotas:{session:{}}});},credits:async()=>{calls++;return Response.json({});}});
  assert.deepEqual((await api.refreshRotationSnapshots('codex',true)).errors,[]);assert.equal(calls,2);
 });
+
+test('monitor status exposes server disablement and sanitized settings-read failures',async()=>{
+ const api=await fixture({settings:async()=>{throw Error('private database details');}}), interval=globalThis.setInterval,clear=globalThis.clearInterval;
+ globalThis.setInterval=()=>({unref(){}});globalThis.clearInterval=()=>{};
+ const prior=process.env.DISABLE_ROTATION_SNAPSHOT_REFRESH;
+ try{
+  process.env.DISABLE_ROTATION_SNAPSHOT_REFRESH='1';
+  assert.equal(api.rotationAutomationStatus({}).quotaReads.disabled,true);
+  delete process.env.DISABLE_ROTATION_SNAPSHOT_REFRESH;
+  api.startRotationSnapshotRefresh();
+  for(let i=0;i<30&&globalThis.__rotationSnapshotRefresh.tick;i++)await new Promise(setImmediate);
+  const status=api.rotationAutomationStatus({}).quotaReads;
+  assert.match(status.lastError,/monitor.*unavailable/i);
+  assert.equal(typeof status.checkedAt,'number');
+  assert.ok(!status.lastError.includes('private database'));
+ }finally{globalThis.setInterval=interval;globalThis.clearInterval=clear;if(prior===undefined)delete process.env.DISABLE_ROTATION_SNAPSHOT_REFRESH;else process.env.DISABLE_ROTATION_SNAPSHOT_REFRESH=prior;delete globalThis.__rotationSnapshotRefresh;delete globalThis.__refreshFixture;}
+});

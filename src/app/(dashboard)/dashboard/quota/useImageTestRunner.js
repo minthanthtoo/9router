@@ -6,6 +6,7 @@ const ACTIVE=new Set(['queued','running','stopping','waiting_reset']);
 const HELD=new Set(['paused','needs_review']);
 export default function useImageTestRunner(refresh,accounts=[]) {
  const [blockedTargets,setBlockedTargets]=useState([]);
+ const [heldReviews,setHeldReviews]=useState({});
  const [recoveryNotice,setRecoveryNotice]=useState(''),[checkingHeld,setCheckingHeld]=useState(null);
  const heldCheck=useRef(false);
  const blockedSnapshot=useRef('[]');
@@ -70,6 +71,12 @@ export default function useImageTestRunner(refresh,accounts=[]) {
    accept(data.run);acceptBlocked(data.blockedTargets);epoch.current++;setStatusKnown(true);setError('');
   }catch{setError('Control outcome unconfirmed. Recheck server status.');}
  };
+ const inspectHeld=async id=>{
+  if(heldCheck.current)return;heldCheck.current=true;setCheckingHeld(id);
+  try{const response=await fetch(`/api/models/image-tests?id=${encodeURIComponent(id)}`,{cache:'no-store',signal:AbortSignal.timeout(15000)});const data=await response.json();if(!response.ok||data.schema!=='admin_image_tests.v1'||!validImageTestRun(data.run)||data.run?.id!==id||!Array.isArray(data.recovery))throw Error();setHeldReviews(current=>({...current,[id]:{checked:false,at:Date.now(),evidence:data.recovery}}));}
+  catch{setError('Saved request details unavailable. The hold is unchanged.');}
+  finally{heldCheck.current=false;setCheckingHeld(null);}
+ };
  const reconcileHeld=async id=>{
   if(heldCheck.current)return;
   heldCheck.current=true;setCheckingHeld(id);setRecoveryNotice('');setError('');
@@ -83,6 +90,7 @@ export default function useImageTestRunner(refresh,accounts=[]) {
    if(result.schema!=='admin_image_tests.v1'||!validImageTestRun(result.run)||result.run?.id!==id||!validBlockedImageTargets(result.blockedTargets))throw Error();
    acceptBlocked(result.blockedTargets);
    const unresolved=result.blockedTargets.filter(target=>target.runId===id).length;
+   setHeldReviews(current=>({...current,[id]:{...current[id],checked:true,at:Date.now(),unresolved}}));
    setRecoveryNotice(unresolved?`${unresolved} ${unresolved===1?'result is':'results are'} still unconfirmed. No new request sent.`:'Saved result confirmed. Recovery hold cleared.');
    await poll();
   }catch{setError('Saved outcome could not be resolved. This account/model remains blocked.');}
@@ -90,7 +98,7 @@ export default function useImageTestRunner(refresh,accounts=[]) {
  };
  const items=(job?.items||[]).map(item=>({...item,accountLabel:accounts.find(account=>account.connectionId===item.connectionId&&account.provider===item.provider)?.accountLabel||`${item.provider||'Account'} ${item.connectionId.slice(0,8)}`}));
  const heldTargets=blockedTargets.map(item=>({...item,accountLabel:accounts.find(account=>account.connectionId===item.connectionId&&(!item.provider||account.provider===item.provider))?.accountLabel||`${item.provider||'Account'} ${item.connectionId.slice(0,8)}`}));
- return {statusKnown,reconcileHeld,recoveryNotice,checkingHeld,blockedTargets:heldTargets,isBlocked:(connectionId,model)=>blockedTargets.some(item=>item.connectionId===connectionId&&item.model===model),job:job?{...job,items}:null,results:items.filter(item=>!['pending','running'].includes(item.state)),busy:creating||ACTIVE.has(job?.state),unknown:!statusKnown||Boolean(pendingKey.current)||HELD.has(job?.state),error,run,retryStart:pendingKey.current&&pendingTargets.current?()=>run(pendingTargets.current,pendingKey.current,pendingOptions.current):null,
+ return {statusKnown,inspectHeld,heldReviews,reconcileHeld,recoveryNotice,checkingHeld,blockedTargets:heldTargets,isBlocked:(connectionId,model)=>blockedTargets.some(item=>item.connectionId===connectionId&&item.model===model),job:job?{...job,items}:null,results:items.filter(item=>!['pending','running'].includes(item.state)),busy:creating||ACTIVE.has(job?.state),unknown:!statusKnown||Boolean(pendingKey.current)||HELD.has(job?.state),error,run,retryStart:pendingKey.current&&pendingTargets.current?()=>run(pendingTargets.current,pendingKey.current,pendingOptions.current):null,
   resultFor:(connectionId,model,provider)=>items.filter(item=>item.connectionId===connectionId&&item.model===model&&(!provider||item.provider===provider)).findLast(item=>item.state==='running')||items.filter(item=>item.connectionId===connectionId&&item.model===model&&(!provider||item.provider===provider)&&item.state!=='pending').at(-1),
   close:()=>control('close'),stop:()=>control('stop'),resume:()=>control('resume'),reconcile:()=>control('reconcile'),refresh:poll};
 }

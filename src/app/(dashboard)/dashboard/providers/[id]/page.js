@@ -413,8 +413,8 @@ export default function ProviderDetailPage() {
     }
   };
 
-  const handleRoundRobinToggle = (enabled) => {
-    const strategy = enabled ? "round-robin" : null;
+  const handleRotationMethodChange = (strategy) => {
+    const enabled = strategy === 'round-robin';
     const sticky = enabled ? (providerStickyLimit || "1") : providerStickyLimit;
     if (enabled && !providerStickyLimit) setProviderStickyLimit("1");
     setProviderStrategy(strategy);
@@ -1584,16 +1584,15 @@ export default function ProviderDetailPage() {
                 </>
               )}
               <RotationSequenceControl provider={providerId} />
-              {/* Round Robin toggle */}
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-text-muted font-medium">Round Robin</span>
-                <Toggle
-                  checked={providerStrategy === "round-robin"}
-                  onChange={handleRoundRobinToggle}
-                />
+                <label className="flex flex-wrap items-center gap-2 text-xs text-text-muted">Within selected group
+                  <select aria-label="Account rotation method" value={providerStrategy || ''} onChange={event=>handleRotationMethodChange(event.target.value || null)} className="min-h-9 rounded-lg border border-border bg-background px-2 text-text-main">
+                    <option value="">Use global settings</option><option value="fill-first">Fill first</option><option value="round-robin">Round robin</option>
+                  </select>
+                </label>
                 {providerStrategy === "round-robin" && (
                   <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-text-muted">Sticky:</span>
+                    <span className="text-xs text-text-muted">Requests/account:</span>
                     <input
                       type="number"
                       min={1}

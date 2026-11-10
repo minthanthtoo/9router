@@ -391,3 +391,52 @@ test('display transitions commit once and respect reduced motion or unsupported 
  window.matchMedia=()=>({matches:true});transition(()=>calls++);assert.equal(calls,3);assert.equal(animations,1);
  delete document.startViewTransition;
 });
+
+test('automation refresh updates status without replacing an unsaved rotation draft',async()=>{
+ const Routing=await component('ImageRouting'),interval=globalThis.setInterval,clear=globalThis.clearInterval;let poll;
+ globalThis.setInterval=(fn,ms)=>ms===30000?(poll=fn,{monitor:true}):interval(fn,ms);
+ globalThis.clearInterval=id=>{if(!id?.monitor)clear(id);};
+ let unavailable=false,heartbeatAge=0,serverSkew=0;
+ globalThis.fetch=async(url,options={})=>{
+  if(String(url).includes('view=automation')){if(unavailable)throw Error('offline');return Response.json({schema:'rotation_automation.v1',automation:{quotaReads:{configured:true,running:true,heartbeatAt:Date.now()-serverSkew-heartbeatAge,checkedAt:Date.now()-serverSkew,cadenceMs:60000}}});}
+  return Response.json({schema:'image_routing.v1',revision:'a'.repeat(64),config:{version:1,rules:[]},automation:{quotaReads:{configured:false,running:false,checkedAt:Date.now()}}});
+ };
+ try{
+  render(React.createElement(Routing,{state:{catalog:[]}}));
+  assert.ok(screen.getByText('Automation · Checking status'));
+  await waitFor(()=>assert.equal(screen.getByRole('combobox',{name:'Image rotation settings'}).value,'provider'));
+  fireEvent.change(screen.getByRole('combobox',{name:'Image rotation settings'}),{target:{value:'custom'}});
+  fireEvent.change(screen.getByRole('spinbutton',{name:'Sticky image requests'}),{target:{value:'7'}});
+  assert.equal(typeof poll,'function');await act(async()=>{await poll();});
+  assert.ok(screen.getByText('Automation · Quota reads running'));
+  assert.equal(screen.getByRole('spinbutton',{name:'Sticky image requests'}).value,'7');
+  heartbeatAge=600000;await act(async()=>{await poll();});assert.ok(screen.getByText('Automation · Quota reads delayed'));
+  heartbeatAge=0;serverSkew=86400000;await act(async()=>{await poll();});assert.ok(screen.getByText('Automation · Quota reads running'));
+  unavailable=true;await act(async()=>{await poll();});
+  assert.ok(screen.getByText('Automation · Status unavailable'));
+  assert.equal(screen.getByRole('combobox',{name:'Image rotation settings'}).value,'custom');
+ }finally{cleanup();globalThis.setInterval=interval;globalThis.clearInterval=clear;}
+});
+
+test('historical unresolved results have dated inspection, scoped explanation and no generation action',async()=>{
+ const Progress=await component('ImageRunProgress');let inspected=0,checked=0;
+ const runner={job:{id:'current',state:'completed',items:[{state:'succeeded'}]},blockedTargets:[{runId:'old',connectionId:'a',model:'m',accountLabel:'Alpha',createdAt:'2026-11-02T19:09:15Z'}],heldReviews:{old:{checked:true,unresolved:1,evidence:[{operationId:'op',evidence:'outcome_unknown',httpStatus:200}]}},inspectHeld:()=>inspected++,reconcileHeld:()=>checked++};
+ render(React.createElement(Progress,{runner,controls:true}));
+ assert.ok(screen.getByText('1 historical unresolved request'));
+ fireEvent.click(screen.getByRole('button',{name:'Inspect saved request for Alpha · m'}));assert.equal(inspected,1);
+ assert.ok(screen.getByText(/Request was sent; output was not confirmed. HTTP 200/));
+ assert.ok(screen.getByText(/Only the listed account\/model pairs are held/));
+ assert.ok(document.querySelector('time[datetime="2026-11-02T19:09:15Z"]'));
+ fireEvent.click(screen.getByRole('button',{name:'Check saved results for Alpha · m'}));assert.equal(checked,1);
+ assert.equal(screen.queryByText('Retry generation'),null);
+});
+
+test('inspect historical request is a bounded read and leaves current run unchanged',async()=>{
+ const useRunner=await component('useImageTestRunner'),calls=[];
+ const current={id:'current',state:'completed',revision:1,items:[{state:'succeeded',connectionId:'a',provider:'codex',model:'m'}]},old={id:'old',state:'cancelled',revision:2,items:[{state:'unknown'}]},blocked=[{runId:'old',connectionId:'a',model:'m'}];
+ globalThis.fetch=async(url,options={})=>{calls.push({url,method:options.method||'GET'});return Response.json({schema:'admin_image_tests.v1',run:String(url).includes('?id=')?old:current,blockedTargets:blocked,recovery:[{operationId:'op',evidence:'outcome_unknown',httpStatus:200}]});};
+ function Probe(){const state=useRunner(()=>{},[]);return React.createElement('div',null,React.createElement('button',{onClick:()=>state.inspectHeld('old')},'Inspect'),React.createElement('p',null,state.job?.id),React.createElement('p',null,state.heldReviews.old?.evidence[0]?.evidence));}
+ render(React.createElement(Probe));await waitFor(()=>assert.ok(screen.getByText('current')));
+ fireEvent.click(screen.getByRole('button',{name:'Inspect'}));await waitFor(()=>assert.ok(screen.getByText('outcome_unknown')));
+ assert.ok(screen.getByText('current'));assert.ok(calls.every(call=>call.method==='GET'));
+});

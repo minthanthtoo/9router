@@ -529,7 +529,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         rotationCandidates = availableConnections.filter((candidate) => (loads.get(candidate.id) || 0) === minimum);
       }
       const stickyLimit = imageSelection.stickyRequests;
-      if (imageRule) {
+      if (options?.imageOperation) {
         connection = await selectImageRotation(rotationCandidates, {provider:providerId,model,operation:options.imageOperation,stickyRequests:stickyLimit,peekOnly:Boolean(options?.peekOnly)});
       } else {
         // Sort by lastUsed (most recent first) to find current candidate

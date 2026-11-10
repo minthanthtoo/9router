@@ -26,8 +26,8 @@ export default function RotationSequenceControl({ provider, initialSorts, compac
   const dialog = useRef(null), launcher = useRef(null), requestId = useRef(0), closing = useRef(null), busyRef = useRef(busy);
   busyRef.current = busy;
   const endpoint = `/api/providers/${encodeURIComponent(provider)}/rotation`;
-  const models = useMemo(() => getModelsByProviderId(provider).filter(row => !['embedding', 'tts', 'stt'].includes(row.kind || row.type)), [provider]);
-  const defaultModel = models.find(row => !['image', 'imageGen'].includes(row.kind || row.type))?.id || models[0]?.id || '';
+  const models = useMemo(() => getModelsByProviderId(provider).filter(row => !['embedding', 'tts', 'stt', 'image', 'imageGen'].includes(row.kind || row.type)), [provider]);
+  const defaultModel = models[0]?.id || '';
   const modelError = !model.trim() ? 'Choose a model for this preview.' : model.length > 256 || !/^[A-Za-z0-9._:/-]+$/.test(model) ? 'Use a valid model ID (letters, numbers, dots, dashes, slashes or underscores).' : '';
   const policy = draft || saved?.policy || emptyRotation();
   const context = JSON.stringify([policy, model]);
@@ -137,9 +137,9 @@ export default function RotationSequenceControl({ provider, initialSorts, compac
             <ProviderIcon providerId={provider} alt="" size={24} /><strong className="capitalize">{provider}</strong>
             <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs">Live: {saved?.policy.enabled ? 'Sequence' : 'Existing rotation'}</span>
             {dirty && <span className="text-xs text-amber-600 dark:text-amber-300">Unsaved changes</span>}
-            <div className="ml-auto"><ImageHelp label="Account rotation"><p>The account sequence is evaluated first. Image model rules select only inside the preferred eligible group. Model switches, provider waits and unknown-job holds remain hard gates. Missing quota observations retain fallback order. Editing does not enable the sequence. Definite account failures move to the next eligible account; invalid requests and unknown accepted image jobs cannot safely be retried.</p></ImageHelp></div>
+            <div className="ml-auto"><ImageHelp label="Account rotation"><p>Eligibility first, priority group second, selection method last. The sort sequence chooses a group; round robin or fill first selects inside it. Image requests also check their model quota and held work before grouping. Inherited image settings reuse these rules with the allowance applicable to the image model, not an unrelated text quota. Missing observations retain fallback order. Editing does not enable the sequence. Unknown accepted image jobs cannot safely be replayed.</p></ImageHelp></div>
           </div>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" role="switch" checked={policy.enabled} disabled={locked} onChange={event => change({ ...policy, enabled: event.target.checked })} />Use sequence</label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" role="switch" checked={policy.enabled} disabled={locked} onChange={event => change({ ...policy, enabled: event.target.checked })} />Use sort sequence</label>
           <div className={`${styles.sortArea} quota-sort-area`}>
            {provider==='codex'&&<ResetPriorityControl value={policy.resetPriority} disabled={locked} onChange={resetPriority=>change({...policy,resetPriority})} />}
            <div className="min-w-0 flex-1"><QuotaSortBar wrap sorts={policy.sorts} options={metrics} provider={provider} disabled={locked} hintId={`rotation-sort-hint-${provider}`} onChange={sorts=>change({...policy,sorts})} /></div>

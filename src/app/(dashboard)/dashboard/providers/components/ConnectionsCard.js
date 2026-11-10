@@ -408,19 +408,19 @@ export default function ConnectionsCard({ providerId, isOAuth, loginProviderId =
           <h2 className="text-lg font-semibold">Connections</h2>
           <div className="flex flex-wrap items-center gap-2">
             <RotationSequenceControl provider={providerId} />
-            <span className="text-xs text-text-muted font-medium">Round Robin</span>
-            <Toggle
-              checked={providerStrategy === "round-robin"}
-              onChange={(enabled) => {
-                const strategy = enabled ? "round-robin" : null;
+            <label className="flex flex-wrap items-center gap-2 text-xs text-text-muted">Within selected group
+            <select aria-label="Account rotation method" value={providerStrategy || ''} className="min-h-9 rounded-lg border border-border bg-background px-2 text-text-main"
+              onChange={(event) => {
+                const strategy = event.target.value || null, enabled = strategy === 'round-robin';
                 setProviderStrategy(strategy);
                 if (enabled && !providerStickyLimit) setProviderStickyLimit("1");
                 saveStrategy(strategy, enabled ? (providerStickyLimit || "1") : providerStickyLimit);
-              }}
-            />
+              }}>
+              <option value="">Use global settings</option><option value="fill-first">Fill first</option><option value="round-robin">Round robin</option>
+            </select></label>
             {providerStrategy === "round-robin" && (
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs text-text-muted">Sticky:</span>
+                <span className="text-xs text-text-muted">Requests/account:</span>
                 <input
                   type="number" min={1} value={providerStickyLimit}
                   onChange={(e) => { setProviderStickyLimit(e.target.value); saveStrategy("round-robin", e.target.value); }}

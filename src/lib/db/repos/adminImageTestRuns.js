@@ -57,8 +57,8 @@ function continueSample(items,item,stopped) {
   if(item.ok&&item.maxAttempts&&item.sample===item.maxAttempts)item.message='Sample budget reached; quota limit not observed.';
 }
 function unresolvedTargets(db) {
-  return db.all("SELECT id,itemsJson FROM adminImageTestRuns WHERE itemsJson LIKE '%\"unknown\"%'").flatMap(row =>
-    JSON.parse(row.itemsJson).filter(item => item.state === 'unknown').map(({connectionId,provider,model,operationId,quotaKey}) => ({connectionId,provider,model,operationId,quotaKey,runId:row.id})));
+  return db.all("SELECT id,itemsJson,createdAt FROM adminImageTestRuns WHERE itemsJson LIKE '%\"unknown\"%'").flatMap(row =>
+    JSON.parse(row.itemsJson).filter(item => item.state === 'unknown').map(({connectionId,provider,model,operationId,quotaKey}) => ({connectionId,provider,model,operationId,quotaKey,runId:row.id,createdAt:row.createdAt})));
 }
 export async function readUnresolvedImageTargets() {
   return unresolvedTargets(await store());

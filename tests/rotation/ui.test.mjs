@@ -36,13 +36,13 @@ test('editor separates activation, auto-previews cached data, ignores stale resp
  return fail?Response.json({error:'Preview failed'},{status:500}):Response.json({preview});
  };
  render(React.createElement(Control,{provider:'codex'}));fireEvent.click(screen.getByRole('button',{name:'Edit codex rotation sequence'}));
- await waitFor(()=>assert.equal(screen.getByRole('switch',{name:'Use sequence'}).disabled,false));
+ await waitFor(()=>assert.equal(screen.getByRole('switch',{name:'Use sort sequence'}).disabled,false));
  await waitFor(()=>assert.ok(screen.getByText('23 ready')),{timeout:10000});
  assert.equal(calls.find(c=>c.body?.action==='preview').body.model,'gpt-6-sol');
  assert.equal(calls.some(c=>c.method==='PATCH'||c.body?.action==='refresh'),false);
  fireEvent.click(screen.getByRole('button',{name:'Short window left %: Off'}));
- assert.equal(screen.getByRole('switch',{name:'Use sequence'}).checked,false);
- fireEvent.click(screen.getByRole('button',{name:'Codex reset priority: off'}));fireEvent.click(screen.getByRole('switch',{name:'Reset credits first'}));fireEvent.click(screen.getAllByRole('button',{name:'Done'}).find(button=>button.closest('[role="dialog"]')?.getAttribute('aria-label')!=='codex account rotation'));assert.equal(screen.getByRole('switch',{name:'Use sequence'}).checked,false);
+ assert.equal(screen.getByRole('switch',{name:'Use sort sequence'}).checked,false);
+ fireEvent.click(screen.getByRole('button',{name:'Codex reset priority: off'}));fireEvent.click(screen.getByRole('switch',{name:'Reset credits first'}));fireEvent.click(screen.getAllByRole('button',{name:'Done'}).find(button=>button.closest('[role="dialog"]')?.getAttribute('aria-label')!=='codex account rotation'));assert.equal(screen.getByRole('switch',{name:'Use sort sequence'}).checked,false);
 
  await waitFor(()=>assert.ok(screen.getByText('23 ready')),{timeout:10000});
  assert.ok(calls.some(c=>c.body?.action==='preview'));assert.equal(calls.some(c=>c.body?.action==='refresh'),false);
@@ -65,7 +65,7 @@ test('editor separates activation, auto-previews cached data, ignores stale resp
  fail=true;fireEvent.change(screen.getByRole('combobox',{name:'Model'}),{target:{value:'fail-model'}});
  await waitFor(()=>assert.ok(screen.getByText('Preview failed')),{timeout:10000});fireEvent.click(screen.getByRole('switch'));
  assert.equal(screen.getByRole('button',{name:'Disable sequence'}).disabled,false);
- cleanup();render(React.createElement(Control,{provider:'claude'}));fireEvent.click(screen.getByRole('button',{name:'Edit claude rotation sequence'}));await waitFor(()=>assert.ok(screen.getByRole('switch',{name:'Use sequence'})));assert.equal(screen.queryByRole('button',{name:/Codex reset priority/}),null);cleanup();
+ cleanup();render(React.createElement(Control,{provider:'claude'}));fireEvent.click(screen.getByRole('button',{name:'Edit claude rotation sequence'}));await waitFor(()=>assert.ok(screen.getByRole('switch',{name:'Use sort sequence'})));assert.equal(screen.queryByRole('button',{name:/Codex reset priority/}),null);cleanup();
 });
 
 test('board preserves account identity and explanation through compact walkthrough, shows all windows and invalidates stale context',async()=>{
@@ -111,6 +111,17 @@ test('wrapping sort editor preserves priority, cycle and attached split when add
  fireEvent.click(screen.getByRole('button',{name:'Weekly reset: Earliest first, priority 1'}));
  fireEvent.click(screen.getByRole('button',{name:'Weekly reset: Latest first, priority 1'}));
  assert.equal(latest.length,1);assert.ok(screen.getByRole('button',{name:'Short window left %: Lowest first, priority 1'}));
+});
+
+test('image preview exposes separate quota gates and the method inside the selected group',async()=>{
+ const React=requireFront('react'),{render,screen}=requireFront('@testing-library/react');
+ const Explorer=await harness('RotationPreviewExplorer'),now=Date.now();
+ const preview={metrics:[],model:'image-fixture',rows:[],groups:[],stages:[],sorts:[],eligible:0,total:3,selectedCount:0,nextId:null,quality:{},strategy:'round-robin',stickyRequests:2,fallback:false,blocked:[{id:'blocked',name:'Account One',gate:'subscription',reason:'Quota exhausted'}],admission:[{id:'account',label:'Enabled accounts',ready:2},{id:'subscription',label:'Subscription allowance',ready:1,unreported:1},{id:'model',label:'Image quota & holds',ready:0}]};
+ render(React.createElement(Explorer,{preview,current:true,now}));
+ assert.equal(screen.getByRole('list',{name:'Image eligibility checks'}).children.length,3);
+ assert.ok(screen.getByText('1 unknown'));
+ assert.ok(screen.getByText('Round robin · 2 requests/account · preferred group'));
+ assert.ok(screen.getByText('Subscription allowance · Quota exhausted'));
 });
 
 afterEach(()=>requireFront('@testing-library/react').cleanup());

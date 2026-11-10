@@ -1,5 +1,10 @@
 .root { min-width: 0; outline: none; display: flex; flex-direction: column; gap: 10px; container-type: inline-size; scroll-margin-top: 8px; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.admission { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; list-style: none; margin: 0; padding: 0; }
+.admission li { display: flex; flex-direction: column; gap: 3px; padding: 7px 9px; border-radius: 8px; background: var(--color-surface-2); border-left: 2px solid var(--color-primary); }
+.admission li > span { font-size: 11px; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.admission strong { font-size: 17px; font-variant-numeric: tabular-nums; }
+.admission small { font-size: 10px; font-weight: 400; color: var(--color-text-muted); }
 .scope { font-size: 11px; color: var(--color-text-muted); min-width: 0; flex: 1 1 220px; }
 .outcome { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: 13px; }
 .note, .quality { color: var(--color-text-muted); font-size: 11px; }
