@@ -1,0 +1,16 @@
+{
+  "captureDate": "2026-11-10",
+  "kind": "Unaltered screenshots of authenticated running remote app in Chrome",
+  "deploymentCommit": "e3dd84df4f8d60907a851a949766d4327a0ac322",
+  "integrationPRHead": "abea785586b849eba6f43c20349688099a7a4720",
+  "relationship": "Deployment is newer than PR head. These show real operational state on the deployment, not acceptance of the exact PR revision. Latest admission preview/cursor correction is not yet carried into PR.",
+  "interaction": "Opened existing saved run review, selected Codex in image rotation, opened existing provider sequence, expanded/collapsed placement explanation. No generation, quota refresh button, permission change, policy save, hold clearing or reset redemption. Existing read-only background refresh may continue.",
+  "privacy": "Published views omit full account emails; aliases and already-masked account labels remain. No DOM data replacement, mock API, synthetic accounts, image retouching or compositing.",
+  "limits": "Saved quota observations and run results are not independent confirmation of provider capacity, quota reset accuracy or live failover. No before/after claim. Concept chart is explanatory, not a captured test.",
+  "sha256": {
+    "live-saved-run.jpg": "1fe7c8d80f6643137f8f06c982563c2d19ad9360cb4532d43a7ce173671a9f50",
+    "live-provider-sequence.jpg": "8e29f7ce53d1cce8ebdc589f51e30f154292678e92ef6571a36822fb6c71865f",
+    "live-provider-comparison.jpg": "3c329ef489a51e97c8a2564b8c2ee906e40d53d6e6455d6e061b965710273ec1",
+    "live-image-rotation.jpg": "2bbbe670f40594edfa35a84aaa6d1311fd854a41e3f6402fce6983b0def643a1"
+  }
+}
