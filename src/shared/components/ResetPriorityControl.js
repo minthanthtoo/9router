@@ -11,6 +11,7 @@ export default function ResetPriorityControl({ value, onChange, disabled = false
 
   useEffect(() => {
     if (!open) return;
+    const launcher = trigger.current;
     panel.current?.querySelector('input')?.focus();
     const trap = event => {
       if (event.key === 'Escape') {
@@ -28,7 +29,7 @@ export default function ResetPriorityControl({ value, onChange, disabled = false
     document.addEventListener('keydown', trap, true);
     return () => {
       document.removeEventListener('keydown', trap, true);
-      trigger.current?.focus({ preventScroll: true });
+      launcher?.focus({ preventScroll: true });
     };
   }, [open]);
 
