@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {QUOTA_SORT_OPTIONS} from '../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/utils.js';
 import {pinnedQuotaSegments,availabilityQuotaSegments} from '../../src/app/(dashboard)/dashboard/quota/quotaPins.mjs';
 
 test('disabled cards follow all active segments even when pinned; re-enabling restores pin order',()=>{
@@ -60,4 +61,8 @@ test('reset groups precede availability and contain all matching waiting and dis
  const flat=availabilityQuotaSegments(segments,[],{},false,true,true);
  assert.equal(flat.length,3);
  assert.deepEqual(flat[0].connections.map(c=>c.id),['match-wait','match-ready','match-off']);
+});
+
+test('quota page reset controls use the same hourglass as provider rotation',()=>{
+ assert.deepEqual(QUOTA_SORT_OPTIONS.filter(option=>option.kind==='reset').map(option=>option.icon),['hourglass_empty','hourglass_empty']);
 });

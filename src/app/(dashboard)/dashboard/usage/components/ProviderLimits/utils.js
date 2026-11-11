@@ -17,8 +17,8 @@ export const ACCOUNT_FILTER_OPTIONS = [
   { value: "inactive", label: "Turned off" },
 ];
 export const QUOTA_SORT_OPTIONS = [
-  { key: "session-reset", label: "Session reset", icon: "update", window: "session", kind: "reset", asc: "Earliest first", desc: "Latest first" },
-  { key: "weekly-reset", label: "Weekly reset", icon: "event_repeat", window: "weekly", kind: "reset", asc: "Earliest first", desc: "Latest first" },
+  { key: "session-reset", label: "Session reset", icon: "hourglass_empty", window: "session", kind: "reset", asc: "Earliest first", desc: "Latest first" },
+  { key: "weekly-reset", label: "Weekly reset", icon: "hourglass_empty", window: "weekly", kind: "reset", asc: "Earliest first", desc: "Latest first" },
   { key: "session-remaining", label: "Session left %", icon: "percent", window: "session", kind: "remaining", asc: "Lowest first", desc: "Highest first" },
   { key: "weekly-remaining", label: "Weekly left %", icon: "percent", window: "weekly", kind: "remaining", asc: "Lowest first", desc: "Highest first" },
 ];
