@@ -1,6 +1,6 @@
 import { readTextModelPolicies } from '@/lib/db/repos/textModelPolicyRepo.js';
 import { rotationPool } from "@/sse/services/providerRotation.js";
-import { emptyRotation, validateRotation, evaluateRotation, applicableRotationQuotas, scopeMatches } from "@/shared/utils/rotationSequence.mjs";
+import { emptyRotation, validateRotation, evaluateRotation, applicableRotationQuotas, scopeMatches, RESET_GROUPS } from "@/shared/utils/rotationSequence.mjs";
 import { readRotationPolicy, readRotationSnapshots, readCreditResetHolds } from "@/lib/db/repos/providerRotationRepo.js";
 import { rotationPreviewInfo } from "@/shared/utils/rotationPreview.mjs";
 import { NextResponse } from "next/server";
@@ -155,7 +155,7 @@ export async function GET(request) {
         ids:segment.rows.map(row=>row.connection.id),
         boundaries:segment.boundaries,
         unavailableIds:segment.rows.filter(row=>unavailable.has(row.connection.id)||applicableRotationQuotas(snapshots[row.connection.id],provider,rotationModel).some(quota=>quota.remaining===0)).map(row=>row.connection.id),
-        rotationName:segment.key.startsWith("reset")?"Expiring credit":"Rotation segment",
+        rotationName:RESET_GROUPS.find(group=>group.key===segment.resetGroup)?.label||"Rotation segment",
       }));
     }
     if (searchParams.has("resetPriority") && !searchParams.has("rotationPolicy")) {

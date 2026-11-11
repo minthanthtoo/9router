@@ -533,7 +533,7 @@ test('listing credit priority follows active controls even with live rotation di
   if(enabled){
    assert.deepEqual(new Set(result.connections.map(c=>c.id)),new Set(accounts.map(c=>c.id)));
    assert.ok(result.rotationSegments.every(s=>s.resetGroup==='reset'));
-   assert.equal(result.rotationSegments[0].rotationName,'Expiring credit');
+   assert.equal(result.rotationSegments[0].rotationName,'Reset · Matches');
   }
  }
 });
