@@ -57,8 +57,8 @@ export function rotationStages(events, policy) {
   const pack = group => ({ key: group.path, ids: group.rows.map(row => row.connection.id), boundaries: group.boundaries || [], note: group.note || null, waiting: Boolean(group.waiting) });
   const stages = [{ id: 'eligible', type: 'eligible', label: 'Eligible', groups: [pack({ path: 'eligible', rows: initial.rows })] }];
   if (!policy.enabled) return stages;
-  let groups = [{ path: 'reset', rows: initial.urgent, boundaries: [] }, { path: 'regular', rows: initial.regular, boundaries: [] }].filter(group => group.rows.length);
-  if (policy.resetPriority.enabled) stages.push({ id: 'credits', type: 'credits', label: 'Reset credits', groups: groups.map(pack) });
+  let groups = [...(initial.creditGroups || [{path:'reset',rows:initial.urgent,boundaries:[]}]), { path: 'regular', rows: initial.regular, boundaries: [] }].filter(group => group.rows.length);
+  if (policy.resetPriority.enabled) stages.push({ id: 'credits', type: 'credits', label: '1 Credit expiry', groups: groups.map(pack) });
   const waiting = [];
   const packed = () => [...groups.map(pack), ...waiting.map(pack)];
   const demote = () => {
@@ -76,11 +76,11 @@ export function rotationStages(events, policy) {
       const event = events.find(event => !event.initial && event.depth === depth && event.path === group.path);
       return event ? { ...group, rows: event.rows, note: event.skipped ? 'No ordering: quota not reported' : null, event } : { ...group, note: group.rows.length === 1 ? 'One account: order unchanged' : group.note, event: null };
     });
-    stages.push({ id: `sort-${depth}`, type: 'sort', rule, ruleIndex: depth, label: `Rule ${depth + 1}`, groups: packed() });
+    stages.push({ id: `sort-${depth}`, type: 'sort', rule, ruleIndex: depth, label: `Rule ${depth + 1 + Number(policy.resetPriority.enabled)}`, groups: packed() });
     if (depth === 0) demote();
     if (depth + 1 < policy.sorts.length) {
       groups = groups.flatMap(group => group.event?.children || [{ ...group, note: group.note || 'No split: one account' }]);
-      stages.push({ id: `split-${depth + 1}`, type: 'split', rule, ruleIndex: depth, division: policy.sorts[depth + 1].division, label: `Split before ${depth + 2}`, groups: [...groups.map(group => ({ ...pack(group), note: group.rows.length > 1 && group.boundaries.at(-1)?.min === group.boundaries.at(-1)?.max && policy.sorts[depth + 1].division !== 'half' ? 'No value split: values equal' : group.note || null })), ...waiting.map(pack)] });
+      stages.push({ id: `split-${depth + 1}`, type: 'split', rule, ruleIndex: depth, division: policy.sorts[depth + 1].division, label: `Split before ${depth + 2 + Number(policy.resetPriority.enabled)}`, groups: [...groups.map(group => ({ ...pack(group), note: group.rows.length > 1 && group.boundaries.at(-1)?.min === group.boundaries.at(-1)?.max && policy.sorts[depth + 1].division !== 'half' ? 'No value split: values equal' : group.note || null })), ...waiting.map(pack)] });
     }
   }
   return stages;

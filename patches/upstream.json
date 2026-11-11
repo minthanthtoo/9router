@@ -26,7 +26,11 @@
       ],
       "entrypoints": [
         "src/sse/services/providerRotation.js",
-        "src/shared/components/RotationSequenceControl.js"
+        "src/shared/components/RotationSequenceControl.js",
+        "src/shared/utils/rotationSequence.mjs",
+        "src/shared/utils/rotationPreview.mjs",
+        "src/shared/components/QuotaSortBar.js",
+        "src/shared/components/ResetPriorityControl.js"
       ],
       "tests": [
         "tests/rotation/sequence.test.mjs",

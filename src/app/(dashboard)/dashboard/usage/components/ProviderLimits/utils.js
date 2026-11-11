@@ -221,7 +221,9 @@ export function segmentVisibleConnections(connections, quotaData, sorts = [], no
       ordering:{...rules[depth],mode:"half",startRank:1,endRank:ordered.length,parentCount:ordered.length,...quotaValueRange(ordered,depth)} }] : [];
   };
   return priority.length ? [
-    ...descend(rows.filter(row => row.connection.rotationHint),0,["reset"],[]).map(segment => ({...segment,rotationName:"Expiring credit"})),
+    ...describeQuotaDivision(rows.filter(row=>row.connection.rotationHint).map(row=>({row,values:[Date.parse(row.connection.rotationHint.expiresAt)]})),0,"asc",rules[0].division)
+      .flatMap(({rows:group,detail},index)=>descend(group.map(item=>item.row),0,["reset",index+1],[{...detail,key:"credit-expiry",label:"Credit expiry",kind:"reset",direction:"asc"}]))
+      .map(segment=>({...segment,rotationName:"Expiring credit"})),
     ...descend(rows.filter(row => !row.connection.rotationHint),0,["regular"],[]).map(segment => ({...segment,rotationName:"Other accounts"})),
   ] : descend(rows,0,[],[]);
 }

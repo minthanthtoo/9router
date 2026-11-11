@@ -45,10 +45,10 @@ export default function ResetPriorityControl({ value, onChange, disabled = false
       aria-label={`Codex credit priority: ${value.enabled ? `on, expires within ${value.days} days` : 'off'}`}
       title={value.enabled ? `Credit priority on · earliest credit expiry first · within ${value.days} days` : "Credit priority off · configure expiring reset credits"}
       onClick={() => setOpen(true)}
-      className={`inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border px-2 text-sm transition-colors ${value.enabled ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-text-muted hover:bg-surface-2'}`}
+      className={`inline-flex h-9 relative shrink-0 items-center gap-1 rounded-lg border px-2 text-sm transition-colors ${value.enabled ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-text-muted hover:bg-surface-2'}`}
     >
-      <span aria-hidden="true" className={`material-symbols-outlined text-[18px] ${value.enabled ? 'text-amber-500' : ''}`}>hourglass_top</span>
-      <span className="quota-sort-label">Credit priority</span>
+      <span aria-hidden="true" className={`material-symbols-outlined text-[18px] ${value.enabled ? 'text-amber-500' : ''}`}>restart_alt</span>
+      <span aria-hidden="true" className="material-symbols-outlined text-[14px]">arrow_upward</span><span className="quota-sort-label">Credit expiry</span>{value.enabled&&<span aria-hidden="true" className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-semibold text-black">1</span>}
       <span className={`rounded-full px-1.5 text-[10px] font-medium ${value.enabled ? 'bg-primary/15 text-primary' : 'bg-surface-2 text-text-muted'}`}>{value.enabled ? `≤${value.days}d` : 'Off'}</span>
     </button>
     {open && createPortal(
@@ -56,7 +56,7 @@ export default function ResetPriorityControl({ value, onChange, disabled = false
         <div ref={panel} role="dialog" aria-modal="true" aria-label="Codex credit priority" className="space-y-4">
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
             <div className="flex items-center gap-2 text-sm font-medium text-text-main">
-              <span aria-hidden="true" className="material-symbols-outlined text-amber-500">hourglass_top</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-amber-500">restart_alt</span>
               Codex user allowance
               <ImageHelp label="Credit priority"><p>Uses the latest saved Codex allowance read. Available reset credits that expire inside the selected window go first by earliest expiry. Accounts that do not match remain eligible and continue through the quota sorts. Automatic reset spends one available credit only when no ordinarily eligible account remains and the selected account has an exhausted applicable allowance. Requests wait for confirmed quota recovery. Unknown reset results are held for review.</p></ImageHelp>
             </div>

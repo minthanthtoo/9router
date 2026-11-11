@@ -127,20 +127,36 @@ test('image preview exposes separate quota gates and the method inside the selec
 afterEach(()=>requireFront('@testing-library/react').cleanup());
 after(()=>dom.window.close());
 
-test('availability grouping control leads the sort bar, is disabled for one sort and toggles with multiple sorts',async()=>{
+test('availability grouping control works with zero, one and multiple sorts',async()=>{
  const React=requireFront('react'),{render,screen,fireEvent,cleanup}=requireFront('@testing-library/react');
  const Bar=await harness('QuotaSortBar');
  const {emptyRotation,rotationMetrics,updateRotationSorts,availabilityGrouping}=await import('../../src/shared/utils/rotationSequence.mjs');
  function Example(){
-  const [policy,setPolicy]=React.useState({...emptyRotation(),sorts:[{key:'session-reset',direction:'asc',division:'half'}]});
+  const [policy,setPolicy]=React.useState({...emptyRotation(),sorts:[]});
   return React.createElement(Bar,{sorts:policy.sorts,options:rotationMetrics('codex'),groupAvailability:availabilityGrouping(policy),onGroupAvailabilityChange:value=>setPolicy({...policy,groupAvailability:value}),onChange:sorts=>setPolicy(updateRotationSorts(policy,sorts))});
  }
  render(React.createElement(Example));
  const button=screen.getByRole('button',{name:'Group Ready and Unavailable accounts'});
- assert.equal(button.disabled,true);assert.equal(button.getAttribute('aria-pressed'),'false');
+ assert.equal(button.disabled,false);assert.equal(button.getAttribute('aria-pressed'),'false');
+ fireEvent.click(button);assert.equal(button.getAttribute('aria-pressed'),'true');
+ fireEvent.click(button);assert.equal(button.getAttribute('aria-pressed'),'false');
+ fireEvent.click(screen.getByRole('button',{name:'Short window reset: Off'}));
+ assert.equal(button.disabled,false);assert.equal(button.getAttribute('aria-pressed'),'false');
+ fireEvent.click(button);assert.equal(button.getAttribute('aria-pressed'),'true');
  fireEvent.click(screen.getByRole('button',{name:'Weekly reset: Off'}));
  assert.equal(button.disabled,false);assert.equal(button.getAttribute('aria-pressed'),'true');
  assert.equal(screen.getByRole('group',{name:'Sort priority'}).querySelector('button'),button);
  fireEvent.click(button);assert.equal(button.getAttribute('aria-pressed'),'false');
+ cleanup();
+});
+
+
+test('reset step shifts quota priorities and enables division before the first quota sort',async()=>{
+ const React=requireFront('react'),{render,screen,cleanup}=requireFront('@testing-library/react');
+ const Bar=await harness('QuotaSortBar');
+ const {rotationMetrics}=await import('../../src/shared/utils/rotationSequence.mjs');
+ render(React.createElement(Bar,{provider:'codex',resetPriority:true,sorts:[{key:'weekly-reset',direction:'asc',division:'gap'}],options:rotationMetrics('codex'),onChange:()=>{}}));
+ assert.ok(screen.getByRole('button',{name:'Weekly reset: Earliest first, priority 2'}));
+ assert.equal(screen.getByRole('button',{name:'Divide before Weekly reset: Largest gap'}).disabled,false);
  cleanup();
 });

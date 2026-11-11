@@ -72,7 +72,7 @@ export default function RotationPreviewExplorer({ preview, current, dirty, now, 
     return () => clearTimeout(timer);
   }, [playing, current, stageIndex, stages]);
   const pageChange = value => { setPlaying(false); setPage(value); root.current?.scrollIntoView({ block: 'start', behavior: 'instant' }); root.current?.focus({ preventScroll: true }); };
-  const stageLabel = step => step.type === 'sort' ? `${step.ruleIndex + 1} ${label(metrics.find(metric => metric.key === step.rule.key))} · ${rotationDirection(metrics.find(metric => metric.key === step.rule.key), step.rule.direction)}` : step.type === 'split' ? `Split: ${divisions[step.division]}` : step.label;
+  const stageLabel = step => step.type === 'sort' ? `${step.ruleIndex + 1 + Number(preview.resetPriorityEnabled)} ${label(metrics.find(metric => metric.key === step.rule.key))} · ${rotationDirection(metrics.find(metric => metric.key === step.rule.key), step.rule.direction)}` : step.type === 'split' ? `Split: ${divisions[step.division]}` : step.label;
   const groupName = (group, index) => group.waiting ? 'Waiting' : stage.type === 'final' ? preview.fallback ? 'Existing rotation' : group.preferred ? 'Preferred' : `Lower priority ${index + 1}` : group.key.startsWith('reset') ? `Expiring credits · Group ${index + 1}` : stage.type === 'eligible' ? 'Eligible accounts' : `Group ${index + 1}`;
   const scopes = [...new Set(preview.rows.map(row => row.scope).filter(Boolean))];
   const explanation = row => <div className={styles.explanation}>

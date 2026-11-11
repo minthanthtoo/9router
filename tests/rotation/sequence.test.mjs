@@ -163,9 +163,22 @@ test('matching 0% accounts lead only with explicit automatic reset consent', () 
 test('availability grouping defaults on at two sorts, supports opt-out and resets when a second sort is added',async()=>{
  const {availabilityGrouping,updateRotationSorts}=await import('../../src/shared/utils/rotationSequence.mjs');
  const one=policy([{key:'weekly-remaining'}]),two=updateRotationSorts(one,[...one.sorts,{key:'session-remaining',direction:'asc',division:'half'}]);
+ assert.equal(availabilityGrouping({...emptyRotation(),groupAvailability:true}),true);
+ assert.equal(availabilityGrouping({...emptyRotation(),groupAvailability:false}),false);
  assert.equal(availabilityGrouping(one),false);assert.equal(availabilityGrouping(two),true);
  assert.equal(availabilityGrouping({...two,groupAvailability:false}),false);
- assert.equal(availabilityGrouping({...one,groupAvailability:true}),false);
+ assert.equal(availabilityGrouping({...one,groupAvailability:true}),true);
  assert.equal(validateRotation({...two,groupAvailability:false},'codex').groupAvailability,false);
  assert.throws(()=>validateRotation({...two,groupAvailability:'yes'},'codex'));
+});
+
+
+test('credit expiry is a grouped first step and quota rules sort inside its partitions',()=>{
+ const ids=['0','1','2','3'];
+ const data=Object.fromEntries(ids.map((id,i)=>[id,{...snapshot([90,10,80,20][i]),credits:{availableCount:1,observedAt:now,expiresAt:now+(i+1)*3600000}}]));
+ const config={...policy([{key:'weekly-remaining',direction:'asc',division:'half'}]),resetPriority:{enabled:true,days:3,weeklyBelow:null}};
+ const result=evaluate(connections.slice(0,4),data,config);
+ assert.deepEqual(result.segments.map(s=>s.rows.map(r=>r.connection.id)),[['1','0'],['3','2']]);
+ assert.equal(result.segments[0].boundaries[0].key,'credit-expiry');
+ assert.equal(result.segments[0].boundaries[0].mode,'half');
 });

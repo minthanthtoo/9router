@@ -51,7 +51,7 @@ test('priority roots retain independent ready partitions and waiting rows go bel
   const s = Object.fromEntries(connections.map((c, i) => [c.id, snapshot(i === 0 ? 0 : 10 * i, 10 * (i + 1))]));
   for (const id of ['a', 'b', 'c']) s[id].credits = { observedAt: now, availableCount: 1, expiresAt: now + 86400000 };
   const { pool, stages } = run(s, { ...policy, resetPriority: { enabled: true, days: 3, weeklyBelow: null } });
-  assert.deepEqual(pool.segments.map(segment => segment.key), ['reset', 'regular.1', 'regular.2']);
+  assert.deepEqual(pool.segments.map(segment => segment.key), ['reset.1', 'reset.2', 'regular.1', 'regular.2']);
   assert.deepEqual(ids(pool.ranked), ['b', 'c', 'd', 'e']); assert.deepEqual(ids(pool.waiting), ['a']);
   assert.deepEqual(stages.at(-1).groups.flatMap(group => group.ids), ['b', 'c', 'd', 'e', 'a']);
 });

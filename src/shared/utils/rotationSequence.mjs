@@ -37,7 +37,7 @@ export function validateRotation(value, provider) {
   if (value.enabled && !sorts.length && !priority.enabled) throw new TypeError('Choose a sort or reset priority');
   return { version: ROTATION_VERSION, enabled: value.enabled, sorts, resetPriority: { ...priority }, ...(value.groupAvailability === undefined ? {} : { groupAvailability: value.groupAvailability }) };
 }
-export function availabilityGrouping(policy) { return policy.sorts.length > 1 && policy.groupAvailability !== false; }
+export function availabilityGrouping(policy) { return policy.groupAvailability ?? policy.sorts.length > 1; }
 export function updateRotationSorts(policy, sorts) {
   return { ...policy, sorts, ...(policy.sorts.length < 2 && sorts.length > 1 ? { groupAvailability: true } : {}) };
 }
@@ -158,25 +158,36 @@ export function evaluateRotation(connections, snapshots, policy, { provider, mod
     return { connection, values: rules.map(rule => rotationValue(snapshot, rule, provider, model, now)), urgent, expiry, fresh };
   });
   const segments = [], waiting = [];
-  onStep?.({ initial: true, rows, urgent: rows.filter(row => row.urgent).sort((a, b) => a.expiry - b.expiry), regular: rows.filter(row => !row.urgent) });
-  const descend = (group, depth, path, boundaries, resetPriority = false) => {
+  const urgent = rows.filter(row => row.urgent).sort((a,b)=>a.expiry-b.expiry);
+  const regular = rows.filter(row => !row.urgent);
+  let creditGroups = urgent.length ? [{path:'reset',rows:urgent,boundaries:[]}] : [];
+  if (rules.length && urgent.length > 1) {
+    const creditRows = urgent.map(row=>({row,values:[row.expiry]}));
+    creditGroups = partitionRotationRows(creditRows,0,'asc',rules[0].division).map(({rows:group,detail},index)=>({
+      path:`reset.${index+1}`,
+      rows:group.map(item=>item.row),
+      boundaries:[{...detail,label:'Credit expiry',kind:'reset',key:'credit-expiry',direction:'asc'}],
+    }));
+  }
+  onStep?.({ initial: true, rows, urgent, regular, creditGroups });
+  const descend = (group, depth, path, boundaries) => {
     const rule = rules[depth];
-    const skipped = resetPriority || !rule || group.every(row => row.values[depth] === null);
-    const ordered = resetPriority ? group : skipped ? group : [...group].sort((a, b) => a.values[depth] === b.values[depth] ? 0 : a.values[depth] === null ? 1 : b.values[depth] === null ? -1 : (a.values[depth] - b.values[depth]) * (rule.direction === 'asc' ? 1 : -1));
+    const skipped = !rule || group.every(row => row.values[depth] === null);
+    const ordered = skipped ? group : [...group].sort((a, b) => a.values[depth] === b.values[depth] ? 0 : a.values[depth] === null ? 1 : b.values[depth] === null ? -1 : (a.values[depth] - b.values[depth]) * (rule.direction === 'asc' ? 1 : -1));
     // Demote after the first ordering, before a split can let exhausted rows change its boundary.
     const waitingRows = !includeExhausted && depth === 0 ? ordered.filter(row => !(row.urgent && policy.resetPriority.autoReset) && rotationValue(snapshots[row.connection.id], { window: 'session', kind: 'remaining' }, provider, model, now) === 0) : [];
     waiting.push(...waitingRows.map(row => ({ ...row, reason: 'Short window exhausted' })));
     const ready = waitingRows.length ? ordered.filter(row => !waitingRows.includes(row)) : ordered;
-    const children = !resetPriority && rule && !skipped && depth + 1 < rules.length && ready.length > 1 ? partitionRotationRows(ready, depth, rule.direction, rules[depth + 1].division).map(({ rows, detail }, index) => ({ rows, path: `${path}.${index + 1}`, boundaries: [...boundaries, { ...detail, label: rule.label, kind: rule.kind, key: rule.key, direction: rule.direction }] })) : null;
-    onStep?.({ depth, path, rows: ordered, ready, waiting: waitingRows, boundaries, children, skipped, ...(resetPriority ? { note: 'Soonest credit expiry first' } : {}) });
+    const children = rule && !skipped && depth + 1 < rules.length && ready.length > 1 ? partitionRotationRows(ready, depth, rule.direction, rules[depth + 1].division).map(({ rows, detail }, index) => ({ rows, path: `${path}.${index + 1}`, boundaries: [...boundaries, { ...detail, label: rule.label, kind: rule.kind, key: rule.key, direction: rule.direction }] })) : null;
+    onStep?.({ depth, path, rows: ordered, ready, waiting: waitingRows, boundaries, children, skipped });
     if (children) children.forEach(child => descend(child.rows, depth + 1, child.path, child.boundaries));
-    else if (!resetPriority && rule && depth + 1 < rules.length) descend(ready, depth + 1, path, boundaries);
+    else if (rule && depth + 1 < rules.length) descend(ready, depth + 1, path, boundaries);
     else if (ready.length) segments.push({ key: path, rows: ready, boundaries });
   };
   if (!policy.enabled) { if (rows.length) segments.push({ key: 'regular', rows, boundaries: [] }); }
   else {
-    descend(rows.filter(row => row.urgent).sort((a, b) => a.expiry - b.expiry), 0, 'reset', [], true);
-    descend(rows.filter(row => !row.urgent), 0, 'regular', []);
+    creditGroups.forEach(group=>descend(group.rows,0,group.path,group.boundaries));
+    descend(regular, 0, 'regular', []);
   }
   const hasEvidence = rows.some(row => row.urgent || row.values.some(value => value !== null));
   return { hasEvidence, segments, waiting, ranked: segments.flatMap(segment => segment.rows), candidates: segments[0]?.rows.map(row => row.connection) || [], staleCount: rows.filter(row => !row.fresh).length };

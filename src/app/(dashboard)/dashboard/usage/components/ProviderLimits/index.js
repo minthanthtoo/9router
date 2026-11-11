@@ -276,7 +276,7 @@ export default function ProviderLimits() {
   const [providerOptions, setProviderOptions] = useState([]);
   const [accountFilter, setAccountFilter] = useState("all");
   const [quotaSorts, setQuotaSorts] = useState([]);
-  const [groupAvailability,setGroupAvailability] = useState(true);
+  const [groupAvailability,setGroupAvailability] = useState(false);
   const [resetPriority,setResetPriority] = useState({enabled:false,days:3,weeklyBelow:null});
   const [rotationPreview, setRotationPreview] = useState(null);
   const [providerSequence,setProviderSequence]=useState(null);
@@ -284,7 +284,7 @@ export default function ProviderLimits() {
   useEffect(()=>{
     if(providerFilter === "all"||!rotationMetrics(providerFilter).length){setProviderSequence(null);setRotationPreview(null);return;}
     const controller=new AbortController();
-    fetch(`/api/providers/${encodeURIComponent(providerFilter)}/rotation?summary=1&model=${encodeURIComponent(imageModel)}`,{cache:"no-store",signal:controller.signal}).then(async response=>{if(!response.ok)throw Error();return response.json();}).then(data=>{if(controller.signal.aborted)return;setProviderSequence({provider:providerFilter,policy:data.effectivePolicy||data.policy});setQuotaSorts((data.effectivePolicy||data.policy)?.sorts||[]);setGroupAvailability((data.effectivePolicy||data.policy)?.groupAvailability!==false);setResetPriority((data.effectivePolicy||data.policy)?.resetPriority||{enabled:false,days:3,weeklyBelow:null});setRotationPreview(null);}).catch(error=>{if(error.name!=="AbortError")setConnectionError("Saved provider sequence unavailable. Refresh to retry.");});
+    fetch(`/api/providers/${encodeURIComponent(providerFilter)}/rotation?summary=1&model=${encodeURIComponent(imageModel)}`,{cache:"no-store",signal:controller.signal}).then(async response=>{if(!response.ok)throw Error();return response.json();}).then(data=>{if(controller.signal.aborted)return;setProviderSequence({provider:providerFilter,policy:data.effectivePolicy||data.policy});setQuotaSorts((data.effectivePolicy||data.policy)?.sorts||[]);setGroupAvailability(availabilityGrouping(data.effectivePolicy||data.policy));setResetPriority((data.effectivePolicy||data.policy)?.resetPriority||{enabled:false,days:3,weeklyBelow:null});setRotationPreview(null);}).catch(error=>{if(error.name!=="AbortError")setConnectionError("Saved provider sequence unavailable. Refresh to retry.");});
     return()=>controller.abort();
   },[providerFilter,imageModel]);
   const [serverRotationSegments, setServerRotationSegments] = useState(null);
@@ -858,7 +858,7 @@ export default function ProviderLimits() {
   const sortedConnections = connectionSegments.flatMap(segment => segment.connections);
   const segmentCount = connectionSegments.filter(segment=>segment.connections.length).length;
   const allCardsCollapsed = sortedConnections.length > 0 && sortedConnections.every(connection=>!cardGroupVisible(quotaVisibility,connection.id,"images",legacyCardCollapse)&&!cardGroupVisible(quotaVisibility,connection.id,"text",legacyCardCollapse));
-  const showSegmentBars=quotaSorts.length>1||resetListing;
+  const showSegmentBars=availabilityGrouping({sorts:quotaSorts,groupAvailability})||quotaSorts.length>1||resetListing;
   const visibleSegments = scopePending ? [] : connectionSegments.filter(segment=>segment.connections.length);
   const scrollOwner = () => {
     let owner=quotaRoot.current?.parentElement;
@@ -1009,7 +1009,7 @@ export default function ProviderLimits() {
         <div className="quota-control-scroll"><div className="flex w-max min-w-full items-center gap-3">
           <div className="quota-sequence-row flex min-w-0 max-w-full items-center gap-2">
           {(providerFilter==='all'||providerFilter==='codex')&&<ResetPriorityControl value={resetPriority} onChange={value=>{setResetPriority(value);setRotationPreview(current=>updateQuotaRotationPreview(current,providerFilter,imageModel,quotaSorts,value));}} />}
-          <div className="min-w-0 flex-1 overflow-x-auto"><QuotaSortBar sorts={quotaSorts} options={providerFilter!=="all" ? rotationMetrics(providerFilter) : QUOTA_SORT_OPTIONS} provider={providerFilter} groupAvailability={groupAvailability} onGroupAvailabilityChange={value=>{setGroupAvailability(value);setRotationPreview(current=>updateQuotaRotationPreview(current,providerFilter,imageModel,quotaSorts,resetPriority,value));}} onChange={sorts=>{const grouped=quotaSorts.length<2&&sorts.length>1?true:groupAvailability;setGroupAvailability(grouped);setQuotaSorts(sorts);setRotationPreview(current=>updateQuotaRotationPreview(current,providerFilter,imageModel,sorts,resetPriority,grouped));}} /></div>
+          <div className="min-w-0 flex-1 overflow-x-auto"><QuotaSortBar resetPriority={resetListing} sorts={quotaSorts} options={providerFilter!=="all" ? rotationMetrics(providerFilter) : QUOTA_SORT_OPTIONS} provider={providerFilter} groupAvailability={groupAvailability} onGroupAvailabilityChange={value=>{setGroupAvailability(value);setRotationPreview(current=>updateQuotaRotationPreview(current,providerFilter,imageModel,quotaSorts,resetPriority,value));}} onChange={sorts=>{const grouped=quotaSorts.length<2&&sorts.length>1?true:groupAvailability;setGroupAvailability(grouped);setQuotaSorts(sorts);setRotationPreview(current=>updateQuotaRotationPreview(current,providerFilter,imageModel,sorts,resetPriority,grouped));}} /></div>
           <div className="shrink-0 border-l border-border pl-2"><QuotaSequencePublish groupAvailability={groupAvailability} sorts={quotaSorts} resetPriority={resetPriority} providers={providerOptions} providerFilter={providerFilter} model={imageSelection?'':imageModel} modelProvider={imageModelProvider} onApplied={(provider,policy)=>{if(provider===providerFilter)setProviderSequence({provider,policy});void fetchConnections(page);}} /></div>
           </div>
           <div role="group" tabIndex={0} aria-label="Quota actions" className="quota-actions flex shrink-0 items-center gap-1.5 border-l border-black/10 pl-3 dark:border-white/10">
