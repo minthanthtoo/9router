@@ -57,7 +57,7 @@ export default function ResetPriorityControl({ value, onChange, disabled = false
             <div className="flex items-center gap-2 text-sm font-medium text-text-main">
               <span aria-hidden="true" className="material-symbols-outlined text-amber-500">hourglass_top</span>
               Codex user allowance
-              <ImageHelp label="Credit priority"><p>Uses the latest saved Codex allowance read. Available reset credits that expire inside the selected window go first by earliest expiry. Accounts that do not match remain eligible and continue through the quota sorts. Automatic reset spends one available credit only when the selected account has an exhausted applicable allowance. Requests wait for confirmed quota recovery. Unknown reset results are held for review.</p></ImageHelp>
+              <ImageHelp label="Credit priority"><p>Uses the latest saved Codex allowance read. Available reset credits that expire inside the selected window go first by earliest expiry. Accounts that do not match remain eligible and continue through the quota sorts. Automatic reset spends one available credit only when no ordinarily eligible account remains and the selected account has an exhausted applicable allowance. Requests wait for confirmed quota recovery. Unknown reset results are held for review.</p></ImageHelp>
             </div>
             <p className="mt-2 text-xs text-text-muted">Available credits expiring soon go first. Other eligible accounts keep their regular quota order.</p>
           </div>
@@ -67,7 +67,7 @@ export default function ResetPriorityControl({ value, onChange, disabled = false
           </label>
           <label className="flex items-start gap-2 rounded-lg border border-amber-500/30 p-2 text-sm">
             <input type="checkbox" role="switch" checked={value.autoReset === true} disabled={disabled || !value.enabled} onChange={event => onChange({ ...value, autoReset: event.target.checked })} />
-            <span>Allow automatic reset<span className="block text-xs text-text-muted">Spend 1 reset credit when quota is empty. Matching 0% accounts stay first.</span></span>
+            <span>Allow automatic reset<span className="block text-xs text-text-muted">Spend 1 credit only when no account can serve without a reset.</span></span>
           </label>
           <div className="grid grid-cols-2 gap-3">
             <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">

@@ -1,5 +1,6 @@
 import { getSettings, getProviderConnectionById, updateProviderConnection } from '@/lib/localDb';
 import { readRotationSnapshots, readCreditResetHolds, completeCreditResetRecovery } from '@/lib/db/repos/providerRotationRepo.js';
+import { rotationPool } from '../../sse/services/providerRotation.js';
 import { applicableRotationQuotas, resetCreditPriority, scopeMatches } from '@/shared/utils/rotationSequence.mjs';
 
 // Only real text dispatch invokes this; previews and background quota reads never spend credits.
@@ -32,7 +33,13 @@ export async function prepareAutomaticCreditReset(connections, policy, model, { 
     try { if (await refreshConfirmed(connection, hold.id)) held.delete(connection.id); } catch {}
   }
   if (!policy?.enabled || !policy.resetPriority?.enabled || policy.resetPriority.autoReset !== true) return { blocked: [...held] };
-  const snapshots = await readRotationSnapshots(connections), now = Date.now();
+  let snapshots = await readRotationSnapshots(connections);
+  const now = Date.now();
+  const ordinaryPolicy = { ...policy, resetPriority: { ...policy.resetPriority, autoReset: false } };
+  const ordinaryReady = () => rotationPool(connections, snapshots, ordinaryPolicy, { provider: 'codex', model, resetHolds: holds.filter(row => held.has(row.connectionId)) }).ranked.length > 0;
+  const exhaustedIds = () => connections.filter(c => applicableRotationQuotas(snapshots[c.id], 'codex', model).some(q => q.remaining === 0)).map(c => c.id);
+  // Use ordinary eligible accounts first, including unknown capacity; a reset is a last resort.
+  if (ordinaryReady()) return { blocked: [...new Set([...held, ...exhaustedIds()])] };
   const matches = connections.filter(c => !held.has(c.id) && c.isActive !== false && resetCreditPriority(c, snapshots[c.id], policy, { provider: 'codex', model, now }))
     .sort((a, b) => snapshots[a.id].credits.expiresAt - snapshots[b.id].credits.expiresAt);
   const blocked = [...held];
@@ -48,7 +55,9 @@ export async function prepareAutomaticCreditReset(connections, policy, model, { 
       const context = { params: Promise.resolve({ connectionId: connection.id }) };
       if (!(await readUsage(new Request('http://localhost/internal-quota-read'), context)).ok || !(await readCredits(new Request('http://localhost/internal-credit-read'), context)).ok) { blocked.push(connection.id); continue; }
       const refreshed = await getProviderConnectionById(connection.id);
-      snapshot = (await readRotationSnapshots([refreshed]))[connection.id];
+      snapshots = await readRotationSnapshots(connections.map(c => c.id === connection.id ? refreshed : c));
+      snapshot = snapshots[connection.id];
+      if (ordinaryReady()) return { blocked: [...new Set([...held, ...exhaustedIds()])] };
       quotas = applicableRotationQuotas(snapshot, 'codex', model, Date.now());
       if (!quotas.length || !quotas.some(q => q.remaining === 0)) return { blocked };
       if (!resetCreditPriority(refreshed, snapshot, policy, { provider: 'codex', model })) { blocked.push(connection.id); continue; }

@@ -3,25 +3,29 @@ import assert from 'node:assert/strict';
 import {createRequire,Module} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
+import {existsSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const require=createRequire(new URL('../package.json',import.meta.url)),esbuild=require('esbuild');
-async function fixture({consent=true,uncertain=false,positive=false,providerRecovered=false,holds=[]}={}) {
+async function fixture({consent=true,uncertain=false,positive=false,providerRecovered=false,holds=[],other=null}={}) {
  const now=Date.now(),connection={id:'empty',provider:'codex',isActive:true,errorCode:429,'modelLock_gpt-6-sol':new Date(now+3600000).toISOString()};
  const policy={version:1,enabled:true,sorts:[],resetPriority:{enabled:true,days:3,weeklyBelow:30,autoReset:consent}};
  const quota=remaining=>({provider:'codex',observedAt:now,credits:{availableCount:1,observedAt:now,expiresAt:now+86400000},quotas:[{id:'session',window:'session',scope:'codex:main',remaining,resetAt:now+3600000},{id:'weekly',window:'weekly',scope:'codex:main',remaining:remaining?70:0,resetAt:now+86400000}]});
- const f={policy,connection,data:quota(positive?70:0),calls:[],holds};globalThis.__autoResetTest=f;
+ const connections=[connection,...(other?[{id:'other',provider:'codex',isActive:other!=='disabled',...(other==='locked'?{errorCode:503,'modelLock_gpt-6-sol':new Date(now+3600000).toISOString()}: {})}]:[])];
+ const f={policy,connection,connections,otherData:other==='unknown'?null:quota(other==='empty'?0:80),data:quota(positive?70:0),calls:[],holds};globalThis.__autoResetTest=f;
  const mocks={
-  '@/lib/localDb':`export const getSettings=async()=>({providerStrategies:{codex:{rotationSequence:globalThis.__autoResetTest.policy}}});export const getProviderConnectionById=async()=>globalThis.__autoResetTest.connection;export const updateProviderConnection=async(id,data)=>{globalThis.__autoResetTest.calls.push('clear-lock');Object.assign(globalThis.__autoResetTest.connection,data)};`,
-  '@/lib/db/repos/providerRotationRepo.js':`export const readRotationSnapshots=async()=>({empty:globalThis.__autoResetTest.data});export const readCreditResetHolds=async()=>globalThis.__autoResetTest.holds;export const completeCreditResetRecovery=async()=>globalThis.__autoResetTest.calls.push('recovered');`,
+  '@/lib/localDb':`export const getSettings=async()=>({providerStrategies:{codex:{rotationSequence:globalThis.__autoResetTest.policy}}});export const getProviderConnectionById=async(id)=>globalThis.__autoResetTest.connections.find(c=>c.id===id);export const updateProviderConnection=async(id,data)=>{globalThis.__autoResetTest.calls.push('clear-lock');Object.assign(globalThis.__autoResetTest.connection,data)};`,
+  '@/lib/db/repos/providerRotationRepo.js':`export const readRotationSnapshots=async()=>({empty:globalThis.__autoResetTest.data,other:globalThis.__autoResetTest.otherData});export const readCreditResetHolds=async()=>globalThis.__autoResetTest.holds;export const completeCreditResetRecovery=async()=>globalThis.__autoResetTest.calls.push('recovered');`,
  };
  const result=await esbuild.build({entryPoints:[resolve(root,'src/shared/services/automaticCreditReset.js')],bundle:true,platform:'node',format:'cjs',write:false,plugins:[{name:'fixture',setup(b){
-  b.onResolve({filter:/^@\//},a=>mocks[a.path]?{path:a.path,namespace:'fixture'}:a.path.includes('/app/api/')?{path:a.path,namespace:'route'}:{path:resolve(root,'src',a.path.slice(2))});
+  b.onResolve({filter:/antigravityQuota\.js$/},()=>({path:'antigravityQuota',namespace:'quota-cache'}));
+  b.onLoad({filter:/.*/,namespace:'quota-cache'},()=>({contents:'export const getAntigravityQuotaBlockForConnection=()=>null;export const getAntigravityQuotaCache=()=>new Map();',loader:'js'}));
+  b.onResolve({filter:/^@\//},a=>mocks[a.path]?{path:a.path,namespace:'fixture'}:a.path.includes('/app/api/')?{path:a.path,namespace:'route'}:{path:resolve(root,'src',a.path.slice(2))+(existsSync(resolve(root,'src',a.path.slice(2)))?'':'.js')});
   b.onLoad({filter:/.*/,namespace:'fixture'},a=>({contents:mocks[a.path],loader:'js'}));
   b.onLoad({filter:/.*/,namespace:'route'},()=>({contents:'export const GET=()=>{throw Error("Unexpected provider read")};export const POST=()=>{throw Error("Unexpected provider write")}',loader:'js'}));
  }}]});
  const m=new Module(resolve(root,'tests/rotation/auto-fixture.cjs'));m.filename=resolve(root,'tests/rotation/auto-fixture.cjs');m._compile(result.outputFiles[0].text,m.filename);
- const run=(model='gpt-6-sol')=>m.exports.prepareAutomaticCreditReset([connection],policy,model,{
+ const run=(model='gpt-6-sol')=>m.exports.prepareAutomaticCreditReset(connections,policy,model,{
   reset:async(_,ctx)=>{f.calls.push('reset');f.sent=true;assert.ok(ctx.automaticCycle);if(uncertain)throw Error('timeout');return Response.json({reset:true,redeemRequestId:'attempt'})},
   readUsage:async()=>{f.calls.push('read-usage');f.data=quota(f.sent||providerRecovered||holds.some(h=>h.state==='confirmed')?80:0);return Response.json({})},
   readCredits:async()=>{f.calls.push('read-credits');return Response.json({})},
@@ -81,4 +85,17 @@ test('a fresh provider read showing recovery prevents an unnecessary credit spen
  const {f,run}=await fixture({providerRecovered:true});
  assert.deepEqual(await run(),{blocked:[]});
  assert.deepEqual(f.calls,['read-usage','read-credits']);
+});
+
+test('automatic reset is last resort across the full eligible pool, not just matching credits',async()=>{
+ for(const other of ['ready','unknown']){
+  const {f,run}=await fixture({other});
+  assert.deepEqual(await run(),{blocked:['empty']});
+  assert.deepEqual(f.calls,[]);
+ }
+ for(const other of ['disabled','locked','empty']){
+  const {f,run}=await fixture({other});
+  assert.equal((await run()).readyId,'empty');
+  assert.equal(f.calls.filter(call=>call==='reset').length,1);
+ }
 });
