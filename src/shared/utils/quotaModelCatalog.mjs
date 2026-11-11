@@ -35,7 +35,7 @@ export function normalizeQuotaModel(provider, raw, editing = false) {
 // Configured support is distinct from current quota, manual pauses and confirmed upstream access.
 export function accountMatchesQuotaModel(connection, model) {
   if (connection.provider !== model.provider) return false;
-  if (accountModelAccess(connection,model.id,connection.modelAccess).reason) return false;
+  if (accountModelAccess(connection,model.id,model.kind==='image'?undefined:connection.modelAccess).reason) return false;
   const allowed = connection.providerSpecificData?.enabledModels;
   // This legacy allowlist governs text models and Codex image access, not other image providers.
   if ((model.kind === 'llm' || model.provider === 'codex') && Array.isArray(allowed) && allowed.length

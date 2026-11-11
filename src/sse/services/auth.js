@@ -341,7 +341,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       }
     }
     const codexModelEnabled = (connection) => {
-      return !accountModelAccess(connection,requestedModel,admissionSnapshots[connection.id]?.modelAccess).reason;
+      return !accountModelAccess(connection,requestedModel,quotaAwareImage?undefined:admissionSnapshots[connection.id]?.modelAccess).reason;
     };
 
     if (quotaAwareImage && !options?.peekOnly && !requestState?.recoveryProbeClaimed && quotaRequestId) {
@@ -397,7 +397,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         if (!eligibility.eligible) return false;
         if (eligibility.state === "probe_eligible" && !options?.peekOnly && c.id !== probeCandidate?.id) return false;
       }
-      if (accountModelAccess(c,requestedModel,admissionSnapshots[c.id]?.modelAccess).reason) return false;
+      if (accountModelAccess(c,requestedModel,quotaAwareImage?undefined:admissionSnapshots[c.id]?.modelAccess).reason) return false;
       // Antigravity: skip if live quota exhausted for this model
       if (!quotaAwareImage && isAntigravity && model && antigravityQuotaCache) {
         const resetAt = antigravityQuotaResetAt(c, model, antigravityQuotaCache);

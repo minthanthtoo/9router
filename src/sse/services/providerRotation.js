@@ -24,7 +24,7 @@ export function rotationPool(connections, snapshots, policy, { provider, model =
     else if (resetHolds.some(row => row.connectionId === connection.id)) reason = 'Reset pending verification';
     else if (!quotaAdmission && isModelLockActive(connection, lockModel) && !(Number(connection.errorCode) === 429 && policy.resetPriority?.autoReset && resetCreditPriority(connection, snapshots[connection.id], policy, { provider, model, now }))) reason = 'Cooling down';
     else if (textReason) reason = textReason;
-    else if (accountModelAccess(connection,model,snapshots[connection.id]?.modelAccess,now).reason) reason=accountModelAccess(connection,model,snapshots[connection.id]?.modelAccess,now).reason;
+    else if (accountModelAccess(connection,model,quotaAdmission?undefined:snapshots[connection.id]?.modelAccess,now).reason) reason=accountModelAccess(connection,model,quotaAdmission?undefined:snapshots[connection.id]?.modelAccess,now).reason;
     if (!reason && quotaAdmission) {
       admission[0].ready++;
       gate = 'subscription';

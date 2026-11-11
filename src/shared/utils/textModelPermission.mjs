@@ -17,7 +17,7 @@ export function accountModelAccess(connection, model, evidence, now = Date.now()
   };
   const enabled=connection.providerSpecificData?.enabledModels;
   if(connection.provider==='codex' && canonical && Array.isArray(enabled) && enabled.length && !enabled.some(id=>canonicalTextModel(connection.provider,id)===canonical || canonicalTextModel(connection.provider,id)===upstream(model))) return {state:'disabled',reason:'Model disabled'};
-  if(!canonical || /image/.test(canonical) || isConfiguredTextModel(connection.provider,canonical)===false || connection.provider!=='codex' || !evidence || evidence.source!=='account_models' || !Array.isArray(evidence.models) || !Number.isFinite(evidence.observedAt) || now<evidence.observedAt || now-evidence.observedAt>600000) return {state:'unknown',reason:null};
+  if(!canonical || isConfiguredTextModel(connection.provider,canonical)===false || connection.provider!=='codex' || !evidence || evidence.source!=='account_models' || !Array.isArray(evidence.models) || !Number.isFinite(evidence.observedAt) || now<evidence.observedAt || now-evidence.observedAt>600000) return {state:'unknown',reason:null};
   const supported=evidence.models.some(id=>upstream(id)===upstream(model));
   return {state:supported?'supported':'unsupported',reason:supported?null:'Model unavailable on this account'};
 }

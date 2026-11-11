@@ -31,6 +31,7 @@ test('account model discovery gates requested text model while unknown evidence 
  assert.equal(accountModelAccess(a,'gpt-image-2',access,now).reason,null);
  assert.equal(textModelPermissionReason(a,model,null,access,now),'Model unavailable on this account');
  assert.equal(accountMatchesQuotaModel({...a,modelAccess:access},{provider:'codex',id:model,kind:'llm'}),false);
+ assert.equal(accountMatchesQuotaModel({...a,modelAccess:access},{provider:'codex',id:'custom-generation',kind:'image'}),true);
  const data={free:{...normalizeRotationUsage('codex',usage(100),now),modelAccess:access},paid:{...normalizeRotationUsage('codex',usage(100,18000),now),modelAccess:evidence([model])}};
  const pool=rotationPool([a,account('paid')],data,emptyRotation(),context);
  assert.deepEqual(pool.ranked.map(row=>row.connection.id),['paid']);
