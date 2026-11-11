@@ -140,7 +140,7 @@ export async function GET(request) {
       const imageStates=image&&['codex','antigravity','gemini'].includes(provider)?await getImageQuotaState(sortedConnections,provider,'image_generation',lockModel):null;
       if(image)policy=resolveImageAccountPreference(resolveImageRouting(await getSettings(),provider,lockModel,'generate'),policy,provider);
       const resetHolds = provider==='codex'&&!image&&scopeMatches(provider,'codex:main',rotationModel)?await readCreditResetHolds(sortedConnections):[];
-      const evaluation = policy.enabled || rotationModel ? rotationPool(sortedConnections, snapshots, policy, {resetHolds,provider,model:rotationModel,lockModel,imageStates,quotaAdmission:image,textPolicies:image?null:await readTextModelPolicies(sortedConnections)}) : evaluateRotation(sortedConnections, snapshots, policy, {provider,model:rotationModel});
+      const evaluation = policy.enabled || policy.groupAvailability || rotationModel ? rotationPool(sortedConnections, snapshots, policy, {resetHolds,provider,model:rotationModel,lockModel,imageStates,quotaAdmission:image,textPolicies:image?null:await readTextModelPolicies(sortedConnections)}) : evaluateRotation(sortedConnections, snapshots, policy, {provider,model:rotationModel});
       resetPrioritySummary = rotationPreviewInfo(evaluation, snapshots, policy, {provider,model:rotationModel,now:Date.now()}).creditSummary;
       // Card sorting includes every account. Request admission remains in rotationPool.
       const displayPolicy = {...policy, enabled: policy.sorts.length > 0 || policy.resetPriority.enabled};

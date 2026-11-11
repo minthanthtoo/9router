@@ -536,3 +536,12 @@ test('listing credit priority follows active controls even with live rotation di
   }
  }
 });
+
+
+test('availability grouping without sorts still classifies disabled accounts',async()=>{
+ const client=await import(new URL('src/app/api/providers/client/route.js',root));
+ const url=new URL('http://localhost/api/providers/client?provider=codex&includeImageAccounts=true&pageSize=100');
+ url.searchParams.set('rotationPolicy',JSON.stringify({...engine.emptyRotation(),groupAvailability:true}));
+ const result=await(await client.GET(new Request(url))).json();
+ assert.ok(result.rotationSegments.flatMap(s=>s.unavailableIds).includes(connections[3].id));
+});
