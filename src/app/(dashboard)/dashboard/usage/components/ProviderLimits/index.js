@@ -1095,7 +1095,7 @@ export default function ProviderLimits() {
       </QuotaControlDock>
       {resetListing && <p role="status" className="px-1 text-xs text-amber-600 dark:text-amber-400">
             Reset first · {resetSummary?.live ? 'Live rule' : 'Listing preview · Apply to routing'}
-            {' · '}{scopePending ? 'Checking…' : resetSummary?.applicable === false ? 'Main Codex text only' : resetSummary ? `${resetSummary.matching} matching · earliest credit expiry first` : 'Expiry not checked'}
+            {' · '}{scopePending ? 'Checking…' : resetSummary?.applicable === false ? 'Main Codex text only' : resetSummary ? `${resetSummary.matching} matching · credit-expiry groups first` : 'Expiry not checked'}
             {!scopePending && resetSummary?.unavailable > 0 && ` · ${resetSummary.unavailable} missing expiry/quota reads`}
             {!scopePending && resetSummary?.matching === 0 && resetSummary?.nextExpiry && ` · Next credit expiry ${new Date(resetSummary.nextExpiry).toLocaleDateString(undefined,{month:'short',day:'numeric'})}`}
             {resetReadError && ` · ${resetReadError}`}
