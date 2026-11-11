@@ -101,7 +101,7 @@ export function cycleQuotaSort(sorts, key) {
   return sorts.filter(sort => sort.key !== key);
 }
 
-export function updateQuotaRotationPreview(current, provider, model, sorts, resetPriority) {
+export function updateQuotaRotationPreview(current, provider, model, sorts, resetPriority, groupAvailability) {
   if (current?.provider !== provider) return null;
   return {
     ...current,
@@ -111,6 +111,7 @@ export function updateQuotaRotationPreview(current, provider, model, sorts, rese
       enabled: sorts.length > 0 || resetPriority.enabled,
       sorts,
       resetPriority,
+      ...(groupAvailability === undefined ? {} : {groupAvailability}),
     },
   };
 }

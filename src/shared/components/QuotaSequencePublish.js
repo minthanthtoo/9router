@@ -13,13 +13,13 @@ async function request(provider,method,body) {
  const response=await fetch(`/api/providers/${encodeURIComponent(provider)}/rotation${method==='GET'?'?summary=1':''}`,{method,cache:'no-store',...(body?{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});
  const data=await response.json();if(!response.ok){const error=new Error(data.error||'Rotation request failed');error.status=response.status;throw error;}return data;
 }
-export default function QuotaSequencePublish({sorts,resetPriority,providers,providerFilter,model,modelProvider,onPreview,onApplied}) {
+export default function QuotaSequencePublish({sorts,resetPriority,groupAvailability,providers,providerFilter,model,modelProvider,onPreview,onApplied}) {
  const [open,setOpen]=useState(false),[curated,setCurated]=useState(null),[selected,setSelected]=useState([]),[rows,setRows]=useState({}),[busy,setBusy]=useState(false),[receipt,setReceipt]=useState(''),[now,setNow]=useState(Date.now);
  const dialog=useRef(null),launcher=useRef(null),generation=useRef(0),jobs=useRef(new Map()),busyRef=useRef(false);
  busyRef.current=busy;
  const openReview=()=>{
   const ids=[...new Set(providers)],policies={},unsupported={};
-  for(const provider of ids){try{policies[provider]=quotaSequencePolicy(provider,sorts,resetPriority);}catch(error){unsupported[provider]=error.message;}}
+  for(const provider of ids){try{policies[provider]=quotaSequencePolicy(provider,sorts,resetPriority,groupAvailability);}catch(error){unsupported[provider]=error.message;}}
   generation.current++;jobs.current.clear();setCurated({sorts:sorts.map(sort=>({...sort})),resetPriority:{...resetPriority},providers:ids,policies,unsupported});setRows({});setSelected(providerFilter!=='all'&&policies[providerFilter]?[providerFilter]:[]);setReceipt('');setOpen(true);
  };
  useEffect(()=>{

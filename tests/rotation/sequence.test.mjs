@@ -159,3 +159,13 @@ test('matching 0% accounts lead only with explicit automatic reset consent', () 
   assert.deepEqual(evaluate(rows,data,config).candidates.map(c=>c.id),['ready']);
   assert.throws(()=>validateRotation({...config,resetPriority:{...config.resetPriority,autoReset:'yes'}},'codex'));
 });
+
+test('availability grouping defaults on at two sorts, supports opt-out and resets when a second sort is added',async()=>{
+ const {availabilityGrouping,updateRotationSorts}=await import('../../src/shared/utils/rotationSequence.mjs');
+ const one=policy([{key:'weekly-remaining'}]),two=updateRotationSorts(one,[...one.sorts,{key:'session-remaining',direction:'asc',division:'half'}]);
+ assert.equal(availabilityGrouping(one),false);assert.equal(availabilityGrouping(two),true);
+ assert.equal(availabilityGrouping({...two,groupAvailability:false}),false);
+ assert.equal(availabilityGrouping({...one,groupAvailability:true}),false);
+ assert.equal(validateRotation({...two,groupAvailability:false},'codex').groupAvailability,false);
+ assert.throws(()=>validateRotation({...two,groupAvailability:'yes'},'codex'));
+});

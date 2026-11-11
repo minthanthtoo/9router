@@ -11,7 +11,7 @@ import ResetPriorityControl from './ResetPriorityControl';
 import ProviderIcon from './ProviderIcon';
 import ImageHelp from '../../app/(dashboard)/dashboard/quota/ImageHelp';
 import { getModelsByProviderId } from '../constants/models';
-import { emptyRotation, rotationMetrics, validateRotation } from '../utils/rotationSequence.mjs';
+import { emptyRotation, rotationMetrics, validateRotation, availabilityGrouping, updateRotationSorts } from '../utils/rotationSequence.mjs';
 import { previewIsCurrent } from '../utils/rotationPreview.mjs';
 import styles from './rotationSequence.module.css';
 const fieldClass = 'min-w-0 rounded-lg border border-border bg-background px-2 py-2 text-sm text-text-main';
@@ -142,7 +142,7 @@ export default function RotationSequenceControl({ provider, initialSorts, compac
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" role="switch" checked={policy.enabled} disabled={locked} onChange={event => change({ ...policy, enabled: event.target.checked })} />Use sort sequence</label>
           <div className={`${styles.sortArea} quota-sort-area`}>
            {provider==='codex'&&<div className="shrink-0 border-r border-border pr-2"><ResetPriorityControl value={policy.resetPriority} disabled={locked} onChange={resetPriority=>change({...policy,resetPriority})} /></div>}
-           <div className="min-w-0 flex-1"><QuotaSortBar wrap sorts={policy.sorts} options={metrics} provider={provider} disabled={locked} hintId={`rotation-sort-hint-${provider}`} onChange={sorts=>change({...policy,sorts})} /></div>
+           <div className="min-w-0 flex-1"><QuotaSortBar wrap sorts={policy.sorts} options={metrics} provider={provider} disabled={locked} hintId={`rotation-sort-hint-${provider}`} groupAvailability={availabilityGrouping(policy)} onGroupAvailabilityChange={groupAvailability=>change({...policy,groupAvailability})} onChange={sorts=>change(updateRotationSorts(policy,sorts))} /></div>
           </div>
           <p id={`rotation-sort-hint-${provider}`} className="sr-only">Click to cycle lowest or earliest, highest or latest, then off. Each later sort partitions the preceding group.</p>
           {validation && <p role="status" className="text-xs text-amber-600 dark:text-amber-300">{validation}</p>}

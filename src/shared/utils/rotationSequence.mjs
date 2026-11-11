@@ -25,7 +25,8 @@ export function emptyRotation() { return { version: ROTATION_VERSION, enabled: f
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const keysOnly = (value, keys) => object(value) && Object.keys(value).every(key => keys.includes(key));
 export function validateRotation(value, provider) {
-  if (!keysOnly(value, ['version', 'enabled', 'sorts', 'resetPriority']) || value.version !== ROTATION_VERSION || typeof value.enabled !== 'boolean' || !Array.isArray(value.sorts) || value.sorts.length > rotationMetrics(provider).length) throw new TypeError('Invalid rotation sequence');
+  if (!keysOnly(value, ['version', 'enabled', 'sorts', 'resetPriority', 'groupAvailability']) || value.version !== ROTATION_VERSION || typeof value.enabled !== 'boolean' || !Array.isArray(value.sorts) || value.sorts.length > rotationMetrics(provider).length) throw new TypeError('Invalid rotation sequence');
+  if (value.groupAvailability !== undefined && typeof value.groupAvailability !== 'boolean') throw new TypeError('Invalid availability grouping');
   const allowed = new Set(rotationMetrics(provider).map(metric => metric.key)), seen = new Set();
   const sorts = value.sorts.map(sort => {
     if (!keysOnly(sort, ['key', 'direction', 'division']) || !allowed.has(sort.key) || seen.has(sort.key) || !['asc', 'desc'].includes(sort.direction) || !DIVISIONS.includes(sort.division)) throw new TypeError('Unsupported or duplicate sort');
@@ -34,7 +35,11 @@ export function validateRotation(value, provider) {
   const priority = value.resetPriority;
   if (!keysOnly(priority, ['enabled', 'days', 'weeklyBelow', 'autoReset']) || typeof priority.enabled !== 'boolean' || !Number.isInteger(priority.days) || priority.days < 1 || priority.days > 30 || !(priority.weeklyBelow === null || typeof priority.weeklyBelow === 'number' && Number.isFinite(priority.weeklyBelow) && priority.weeklyBelow >= 0 && priority.weeklyBelow <= 100) || priority.autoReset !== undefined && typeof priority.autoReset !== 'boolean' || priority.enabled && provider !== 'codex') throw new TypeError('Invalid reset-credit priority');
   if (value.enabled && !sorts.length && !priority.enabled) throw new TypeError('Choose a sort or reset priority');
-  return { version: ROTATION_VERSION, enabled: value.enabled, sorts, resetPriority: { ...priority } };
+  return { version: ROTATION_VERSION, enabled: value.enabled, sorts, resetPriority: { ...priority }, ...(value.groupAvailability === undefined ? {} : { groupAvailability: value.groupAvailability }) };
+}
+export function availabilityGrouping(policy) { return policy.sorts.length > 1 && policy.groupAvailability !== false; }
+export function updateRotationSorts(policy, sorts) {
+  return { ...policy, sorts, ...(policy.sorts.length < 2 && sorts.length > 1 ? { groupAvailability: true } : {}) };
 }
 export function cycleRotationSort(sorts, key) {
   const active = sorts.find(sort => sort.key === key);

@@ -2,9 +2,10 @@
 import {cycleRotationSort,DIVISIONS} from '../utils/rotationSequence.mjs';
 import styles from './quotaSortBar.module.css';
 import {QUOTA_DIVISION_OPTIONS} from '../utils/quotaSequenceDraft.mjs';
-export default function QuotaSortBar({sorts,options,onChange,provider,disabled=false,hintId='quota-sort-hint',wrap=false}) {
+export default function QuotaSortBar({sorts,options,onChange,provider,disabled=false,hintId='quota-sort-hint',wrap=false,groupAvailability=true,onGroupAvailabilityChange}) {
  const sequence=[...sorts.map(sort=>options.find(option=>option.key===sort.key)).filter(Boolean),...options.filter(option=>!sorts.some(sort=>sort.key===option.key))];
  return <div role="group" tabIndex={0} aria-label="Sort priority" className={wrap ? styles.wrapping : "flex shrink-0 items-center gap-1.5"}>
+ {onGroupAvailabilityChange && <button type="button" disabled={disabled||sorts.length<2} aria-label="Group Ready and Unavailable accounts" aria-pressed={sorts.length>1&&groupAvailability} title={sorts.length<2?'Add a second sort to group by availability':'Group Ready and Unavailable accounts. Does not change eligibility.'} onClick={()=>onGroupAvailabilityChange(!groupAvailability)} className={`quota-division flex h-8 w-8 shrink-0 items-center justify-center rounded-md border-0 ${sorts.length>1&&groupAvailability?'text-cyan-700 dark:text-cyan-300':'text-text-muted opacity-40'}`}><span aria-hidden="true" className="material-symbols-outlined text-[18px]">filter_alt</span></button>}
  {sequence.map((option,position)=>{
   const priority=sorts.findIndex(sort=>sort.key===option.key),active=sorts[priority],direction=value=>option[value]||(option.kind==='remaining'?(value==='asc'?'Lowest first':'Highest first'):(value==='asc'?'Earliest first':'Latest first'));
   const current=active?direction(active.direction):'Off',next=!active?direction('asc'):active.direction==='asc'?direction('desc'):'Off';

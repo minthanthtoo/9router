@@ -1,6 +1,6 @@
 "use client";
 import {quotaDisplayTransition} from "@/shared/utils/quotaDisplayTransition";
-import { emptyRotation, rotationMetrics } from "@/shared/utils/rotationSequence.mjs";
+import { emptyRotation, rotationMetrics, availabilityGrouping } from "@/shared/utils/rotationSequence.mjs";
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
@@ -18,7 +18,7 @@ import ImageManagementDialog from "../../../quota/ImageManagementDialog";
 import ImageModelSelector from "../../../quota/ImageModelSelector";
 import QuotaProviderSelector from "../../../quota/QuotaProviderSelector";
 import QuotaControlDock from "../../../quota/QuotaControlDock";
-import {pinnedQuotaSegments,toggleQuotaPin} from "../../../quota/quotaPins.mjs";
+import {availabilityQuotaSegments,toggleQuotaPin} from "../../../quota/quotaPins.mjs";
 import QuotaSegmentBar from "../../../quota/QuotaSegmentBar";
 import QuotaCardPin from "../../../quota/QuotaCardPin";
 import QuotaCardDetailsOverlay from "../../../quota/QuotaCardDetailsOverlay";
@@ -276,6 +276,7 @@ export default function ProviderLimits() {
   const [providerOptions, setProviderOptions] = useState([]);
   const [accountFilter, setAccountFilter] = useState("all");
   const [quotaSorts, setQuotaSorts] = useState([]);
+  const [groupAvailability,setGroupAvailability] = useState(true);
   const [resetPriority,setResetPriority] = useState({enabled:false,days:3,weeklyBelow:null});
   const [rotationPreview, setRotationPreview] = useState(null);
   const [providerSequence,setProviderSequence]=useState(null);
@@ -283,7 +284,7 @@ export default function ProviderLimits() {
   useEffect(()=>{
     if(providerFilter === "all"||!rotationMetrics(providerFilter).length){setProviderSequence(null);setRotationPreview(null);return;}
     const controller=new AbortController();
-    fetch(`/api/providers/${encodeURIComponent(providerFilter)}/rotation?summary=1&model=${encodeURIComponent(imageModel)}`,{cache:"no-store",signal:controller.signal}).then(async response=>{if(!response.ok)throw Error();return response.json();}).then(data=>{if(controller.signal.aborted)return;setProviderSequence({provider:providerFilter,policy:data.effectivePolicy||data.policy});setQuotaSorts((data.effectivePolicy||data.policy)?.sorts||[]);setResetPriority((data.effectivePolicy||data.policy)?.resetPriority||{enabled:false,days:3,weeklyBelow:null});setRotationPreview(null);}).catch(error=>{if(error.name!=="AbortError")setConnectionError("Saved provider sequence unavailable. Refresh to retry.");});
+    fetch(`/api/providers/${encodeURIComponent(providerFilter)}/rotation?summary=1&model=${encodeURIComponent(imageModel)}`,{cache:"no-store",signal:controller.signal}).then(async response=>{if(!response.ok)throw Error();return response.json();}).then(data=>{if(controller.signal.aborted)return;setProviderSequence({provider:providerFilter,policy:data.effectivePolicy||data.policy});setQuotaSorts((data.effectivePolicy||data.policy)?.sorts||[]);setGroupAvailability((data.effectivePolicy||data.policy)?.groupAvailability!==false);setResetPriority((data.effectivePolicy||data.policy)?.resetPriority||{enabled:false,days:3,weeklyBelow:null});setRotationPreview(null);}).catch(error=>{if(error.name!=="AbortError")setConnectionError("Saved provider sequence unavailable. Refresh to retry.");});
     return()=>controller.abort();
   },[providerFilter,imageModel]);
   const [serverRotationSegments, setServerRotationSegments] = useState(null);
@@ -851,13 +852,13 @@ export default function ProviderLimits() {
   }, [autoRefresh, refreshAll, hasHydratedAutoRefresh]);
 
   const connectionSegments = useMemo(
-    () => pinnedQuotaSegments(scopePending ? [] : rotationScope && serverRotationSegments ? serverRotationSegments.map(segment => ({...segment, connections: segment.ids.map(id => connections.find(connection => connection.id === id)).filter(Boolean)})).filter(segment => segment.connections.length) : segmentVisibleConnections(connections, quotaData, quotaSorts),pinnedCards),
-    [connections, quotaData, quotaSorts, scopePending,pinnedCards, rotationScope, serverRotationSegments],
+    () => availabilityQuotaSegments(scopePending ? [] : rotationScope && serverRotationSegments ? serverRotationSegments.map(segment => ({...segment, connections: segment.ids.map(id => connections.find(connection => connection.id === id)).filter(Boolean)})).filter(segment => segment.connections.length) : segmentVisibleConnections(connections, quotaData, quotaSorts),pinnedCards,quotaData,availabilityGrouping({sorts:quotaSorts,groupAvailability}),Boolean(rotationScope&&serverRotationSegments)),
+    [connections, quotaData, quotaSorts, scopePending,pinnedCards, rotationScope, serverRotationSegments,groupAvailability],
   );
   const sortedConnections = connectionSegments.flatMap(segment => segment.connections);
   const segmentCount = connectionSegments.filter(segment=>segment.connections.length).length;
   const allCardsCollapsed = sortedConnections.length > 0 && sortedConnections.every(connection=>!cardGroupVisible(quotaVisibility,connection.id,"images",legacyCardCollapse)&&!cardGroupVisible(quotaVisibility,connection.id,"text",legacyCardCollapse));
-  const showSegmentBars=Boolean(rotationScope)||resetListing||quotaSorts.length>0||connectionSegments.some(segment=>segment.key==="pinned");
+  const showSegmentBars=availabilityGrouping({sorts:quotaSorts,groupAvailability});
   const visibleSegments = scopePending ? [] : connectionSegments.filter(segment=>segment.connections.length);
   const scrollOwner = () => {
     let owner=quotaRoot.current?.parentElement;
@@ -1008,8 +1009,8 @@ export default function ProviderLimits() {
         <div className="quota-control-scroll"><div className="flex w-max min-w-full items-center gap-3">
           <div className="quota-sequence-row flex min-w-0 max-w-full items-center gap-2">
           {(providerFilter==='all'||providerFilter==='codex')&&<ResetPriorityControl value={resetPriority} onChange={value=>{setResetPriority(value);setRotationPreview(current=>updateQuotaRotationPreview(current,providerFilter,imageModel,quotaSorts,value));}} />}
-          <div className="min-w-0 flex-1 overflow-x-auto"><QuotaSortBar sorts={quotaSorts} options={providerFilter!=="all" ? rotationMetrics(providerFilter) : QUOTA_SORT_OPTIONS} provider={providerFilter} onChange={sorts=>{setQuotaSorts(sorts);setRotationPreview(current=>updateQuotaRotationPreview(current,providerFilter,imageModel,sorts,resetPriority));}} /></div>
-          <div className="shrink-0 border-l border-border pl-2"><QuotaSequencePublish sorts={quotaSorts} resetPriority={resetPriority} providers={providerOptions} providerFilter={providerFilter} model={imageSelection?'':imageModel} modelProvider={imageModelProvider} onApplied={(provider,policy)=>{if(provider===providerFilter)setProviderSequence({provider,policy});void fetchConnections(page);}} /></div>
+          <div className="min-w-0 flex-1 overflow-x-auto"><QuotaSortBar sorts={quotaSorts} options={providerFilter!=="all" ? rotationMetrics(providerFilter) : QUOTA_SORT_OPTIONS} provider={providerFilter} groupAvailability={groupAvailability} onGroupAvailabilityChange={value=>{setGroupAvailability(value);setRotationPreview(current=>updateQuotaRotationPreview(current,providerFilter,imageModel,quotaSorts,resetPriority,value));}} onChange={sorts=>{const grouped=quotaSorts.length<2&&sorts.length>1?true:groupAvailability;setGroupAvailability(grouped);setQuotaSorts(sorts);setRotationPreview(current=>updateQuotaRotationPreview(current,providerFilter,imageModel,sorts,resetPriority,grouped));}} /></div>
+          <div className="shrink-0 border-l border-border pl-2"><QuotaSequencePublish groupAvailability={groupAvailability} sorts={quotaSorts} resetPriority={resetPriority} providers={providerOptions} providerFilter={providerFilter} model={imageSelection?'':imageModel} modelProvider={imageModelProvider} onApplied={(provider,policy)=>{if(provider===providerFilter)setProviderSequence({provider,policy});void fetchConnections(page);}} /></div>
           </div>
           <div role="group" tabIndex={0} aria-label="Quota actions" className="quota-actions flex shrink-0 items-center gap-1.5 border-l border-black/10 pl-3 dark:border-white/10">
           <ImageManagementDialog controlsRef={imageManagement} state={imageState} onOpenAccountSettings={openImageAccountSettings} onSelectModel={changeImageModel} settingsError={imageAccountSettingsError} />
@@ -1086,7 +1087,7 @@ export default function ProviderLimits() {
         </div>
         <p id="quota-sort-hint" className="text-xs text-text-muted">
 
-          {rotationScope ? `${segmentCount} rotation segments · all filtered accounts` : quotaSorts.length ? `${segmentCount} segment${segmentCount === 1 ? "" : "s"} · staged sorting · this page` : "Sort: off → ↑ → ↓ → off · this page"}
+          {rotationScope ? `${showSegmentBars?segmentCount+" availability groups":"Sorted accounts"} · all filtered accounts` : quotaSorts.length ? `${showSegmentBars?segmentCount+" availability groups":"Sorted accounts"} · this page` : "Sort: off → ↑ → ↓ → off · this page"}
           <span className="sr-only"> Session means the reported short window, including Codex 5h. Each later sort divides its preceding ordered group just before sorting: ½ balances card counts, P50 splits at the median value, and Gap splits at the largest value jump. P50/Gap keep ties together and put unreported values in a separate trailing group. With one sort there is no division. Multiple reset pools use the next reset; remaining uses the main window, or the lowest reported pool if no main window exists. Sorting stays within the loaded page.</span>
         </p>
         </div>

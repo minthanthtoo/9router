@@ -110,6 +110,24 @@
       "tests": [
         "scripts/patches/test_export.py"
       ]
+    },
+    {
+      "id": "ready-groups-reset-fallback",
+      "status": "committed-dependent-feature",
+      "depends_on": [
+        "codex-consented-reset",
+        "quota-cards-and-controls"
+      ],
+      "entrypoints": [
+        "src/shared/services/automaticCreditReset.js",
+        "src/app/(dashboard)/dashboard/quota/quotaPins.mjs",
+        "src/shared/components/QuotaSortBar.js"
+      ],
+      "tests": [
+        "tests/rotation/automatic-reset.test.mjs",
+        "tests/rotation/card-segments.test.mjs",
+        "tests/rotation/ui.test.mjs"
+      ]
     }
   ]
 }
