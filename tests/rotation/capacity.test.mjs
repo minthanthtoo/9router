@@ -43,7 +43,7 @@ test('cross-account comparisons reject different speed/effort and substantially 
 });
 test('relative percentage display never invents a request counter',async()=>{
  const {getQuotaUsageDisplay}=await import('../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/quotaUsageDisplay.mjs');
- assert.equal(getQuotaUsageDisplay({displayUnit:'relative_percentage',used:16,total:100,remaining:84}).text,'84% left');
+ assert.equal(getQuotaUsageDisplay({displayUnit:'relative_percentage',used:16,total:100,remaining:84}).text,'Plan allowance');
  assert.match(getQuotaUsageDisplay({displayUnit:'relative_percentage',quotaStatus:'unknown'}).text,/unknown/);
  assert.equal(getQuotaUsageDisplay({displayUnit:'relative_percentage',remaining:null,used:null}).text,'Unreported');
  const {rotationMetrics,rotationValue}=await import('../../src/shared/utils/rotationSequence.mjs');

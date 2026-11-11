@@ -1,7 +1,7 @@
 export function getQuotaUsageDisplay(quota = {}) {
   if(quota.displayUnit==='relative_percentage' && quota.quotaStatus!=='unknown') {
     const remaining=typeof quota.remaining==='number' ? quota.remaining : typeof quota.used==='number' ? 100-quota.used : NaN;
-    return {text:Number.isFinite(remaining)?`${Math.round(remaining)}% left`:'Unreported',title:'Provider-reported relative allowance. Not a request or token count; percentages across different plans are not equal capacity.'};
+    return {text:Number.isFinite(remaining)?'Plan allowance':'Unreported',title:'Provider-reported relative allowance. Not a request or token count; percentages across different plans are not equal capacity.'};
   }
   if (quota.displayUnit === "image_window_unreported") {
     return {
