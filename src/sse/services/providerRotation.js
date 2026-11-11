@@ -5,6 +5,11 @@ import { getAntigravityQuotaBlockForConnection, getAntigravityQuotaCache } from 
 import { textModelPermissionReason, isConfiguredTextModel } from '../../shared/utils/textModelPermission.mjs';
 
 export function rotationPool(connections, snapshots, policy, { provider, model = '', lockModel = model, now = Date.now(), onStep, imageStates, quotaAdmission = false, textPolicies, resetHolds = [] }) {
+  // Resettable exhausted accounts enter selection only after the ordinary pool is empty.
+  if (provider === 'codex' && !quotaAdmission && policy.resetPriority?.autoReset) {
+    const ordinary = { ...policy, resetPriority: { ...policy.resetPriority, autoReset: false } };
+    if (rotationPool(connections, snapshots, ordinary, { provider, model, lockModel, now, imageStates, textPolicies, resetHolds }).ranked.length) policy = ordinary;
+  }
   const blocked = [], eligible = [];
   const admission = quotaAdmission ? [
     { id: 'account', label: 'Enabled accounts', ready: 0 },

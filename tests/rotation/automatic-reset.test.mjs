@@ -99,3 +99,14 @@ test('automatic reset is last resort across the full eligible pool, not just mat
   assert.equal(f.calls.filter(call=>call==='reset').length,1);
  }
 });
+
+test('preview and selection use ordinary ready accounts before reset-required priority candidates',async()=>{
+ const {rotationPool}=await import('../../src/sse/services/providerRotation.js');
+ const {f}=await fixture({other:'ready'});
+ const snapshots={empty:f.data,other:{...f.otherData,credits:null}};
+ const pool=rotationPool(f.connections,snapshots,f.policy,{provider:'codex',model:'gpt-6-sol'});
+ assert.deepEqual(pool.candidates.map(c=>c.id),['other']);
+ assert.equal(pool.ranked.some(row=>row.connection.id==='empty'),false);
+ const fallback=rotationPool([f.connection],snapshots,f.policy,{provider:'codex',model:'gpt-6-sol'});
+ assert.equal(fallback.candidates[0].id,'empty');
+});
