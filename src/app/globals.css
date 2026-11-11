@@ -721,6 +721,8 @@ button:disabled,
 .quota-segment-bar.is-compact { height: 40px; padding: 3px 4px; }
 .quota-segment-bar.is-compact .quota-segment-heading { gap: 6px; }
 .quota-segment-bar.is-compact h2 { flex-shrink: 0; }
+.quota-segment-bar.is-compact .quota-segment-metric { max-width: 8rem; }
+.quota-segment-bar.is-compact .quota-segment-method { display: none; }
 .quota-segment-ticker { height: 24px; display: flex; align-items: center; overflow: hidden; }
 .quota-segment-tick { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: quota-tick 260ms ease-out; }
 .quota-ticker-pause { display: grid; place-items: center; flex-shrink: 0; width: 24px; height: 28px; border-radius: 6px; color: var(--color-text-muted); }

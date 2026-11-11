@@ -55,7 +55,7 @@ export function formatQuotaSortValue(value, kind) {
   if(kind==="capacity")return `≈${Number(value.toFixed(1))} requests`;
   return kind === "reset" ? new Date(value).toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit",second:"2-digit"}) : `${Number(value.toFixed(2))}%`;
 }
-function formatQuotaGap(value, kind) {
+export function formatQuotaGap(value, kind) {
   if(kind==="capacity")return `${Number(value.toFixed(1))} requests`;
   if (kind !== "reset") return `${Number(value.toFixed(2))} pp`;
   const seconds=Math.round(value/1000),days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600),minutes=Math.floor(seconds%3600/60),rest=seconds%60;
