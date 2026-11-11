@@ -37,7 +37,8 @@
         "tests/rotation/preview.test.mjs",
         "tests/rotation/waiting.test.mjs",
         "tests/rotation/integration.test.mjs"
-      ]
+      ],
+      "notes": "Reset-credit display groups preserve ready and unavailable accounts together; reset sort controls share an hourglass glyph with window badges."
     },
     {
       "id": "image-quota-and-fallback",

@@ -183,3 +183,8 @@ test('reset criteria create exactly three roots and later sorts stay inside each
  const expired={...data['0'],credits:{...data['0'].credits,expiresAt:now-1}};
  assert.equal(evaluate(connections.slice(0,1),{'0':expired},config).ranked[0].resetGroup,'regular');
 });
+
+ test('reset sort icons share an hourglass while keeping window identity',()=>{
+ const resets=rotationMetrics('codex').filter(metric=>metric.kind==='reset');
+ assert.deepEqual(resets.map(metric=>[metric.window,metric.icon]),[['session','hourglass_empty'],['weekly','hourglass_empty']]);
+ });

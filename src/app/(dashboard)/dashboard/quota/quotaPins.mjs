@@ -19,9 +19,10 @@ export function availabilityQuotaSegments(segments, pins, quotaData, enabled, au
    const connections=members.flatMap(segment=>segment.connections);
    if(!connections.length)return [];
    const group={key,connections,boundaries:[],unavailableIds:members.flatMap(segment=>segment.unavailableIds||[])};
-   return availabilityQuotaSegments([group],pins,quotaData,enabled,authoritative,false).map(segment=>({
+   const splitAvailability=enabled && key==='regular';
+   return availabilityQuotaSegments([group],pins,quotaData,splitAvailability,authoritative,false).map(segment=>({
     ...segment,key:`${key}-${segment.key}`,resetGroup:key,
-    rotationName:enabled?`${label} · ${segment.key==='ready'?'Ready':'Unavailable'}`:label,
+    rotationName:splitAvailability?`${label} · ${segment.key==='ready'?'Ready':'Unavailable'}`:label,
    }));
   });
  }

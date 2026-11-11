@@ -23,7 +23,7 @@ const LABELS = { session: 'Short window', weekly: 'Weekly', monthly: 'Monthly', 
 export function rotationMetrics(provider) {
   return (WINDOWS[provider] || []).flatMap(window => ['remaining', 'reset'].map(kind => ({
     key: `${window}-${kind}`, window, kind, label: `${LABELS[window]} ${kind === 'remaining' ? 'left %' : 'reset'}`,
-    icon: kind === 'remaining' ? 'percent' : window === 'weekly' ? 'event_repeat' : 'update',
+    icon: kind === 'remaining' ? 'percent' : 'hourglass_empty',
   }))).filter(metric => !(provider === 'ollama' && metric.kind === 'reset'));
 }
 export function emptyRotation() { return { version: ROTATION_VERSION, enabled: false, sorts: [], resetPriority: { enabled: false, days: 3, weeklyBelow: null } }; }
