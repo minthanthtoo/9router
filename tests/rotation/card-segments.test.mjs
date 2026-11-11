@@ -20,7 +20,7 @@ test('card display has at most Ready and Unavailable groups, with pins staying i
  const segments=[{key:'regular.1',connections:[zero,ready,off]},{key:'waiting',connections:[waiting]},{key:'unavailable',connections:[blocked]}];
  const data={zero:{quotas:[{quotaType:'session',remainingPercentage:0}]}};
  const grouped=availabilityQuotaSegments(segments,['off','zero'],data,true);
- assert.deepEqual(grouped.map(group=>[group.key,group.connections.map(c=>c.id)]),[['ready',['ready']],['unavailable',['zero','waiting','blocked','off']]]);
+ assert.deepEqual(grouped.map(group=>[group.key,group.connections.map(c=>c.id)]),[['ready',['ready']],['unavailable',['zero','off','waiting','blocked']]]);
  const flat=availabilityQuotaSegments(segments,[],data,false);
  assert.equal(flat.length,1);assert.equal(flat[0].key,'all');assert.equal(flat[0].connections.length,5);
 });
@@ -30,4 +30,11 @@ test('request-scoped server availability wins over unrelated zero quota windows'
  const data={ready:{quotas:[{quotaType:'weekly',remainingPercentage:0}]}};
  assert.equal(availabilityQuotaSegments([{key:'regular',connections:[account]}],[],data,true,true)[0].key,'ready');
  assert.equal(availabilityQuotaSegments([{key:'regular',connections:[account],unavailableIds:['ready']}],[],{},true,true)[0].key,'unavailable');
+});
+
+test('ungrouped cards preserve reset order across ready, waiting and disabled accounts',()=>{
+ const cards=[{id:'early',isActive:false},{id:'waiting'},{id:'ready'}];
+ const sections=[{key:'all',connections:cards,unavailableIds:['early','waiting']}];
+ assert.deepEqual(availabilityQuotaSegments(sections,[],{},false,true)[0].connections.map(c=>c.id),['early','waiting','ready']);
+ assert.deepEqual(availabilityQuotaSegments(sections,[],{},true,true).map(g=>g.connections.map(c=>c.id)),[['ready'],['early','waiting']]);
 });

@@ -143,10 +143,17 @@ export async function GET(request) {
       const evaluation = policy.enabled || rotationModel ? rotationPool(sortedConnections, snapshots, policy, {resetHolds,provider,model:rotationModel,lockModel,imageStates,quotaAdmission:image,textPolicies:image?null:await readTextModelPolicies(sortedConnections)}) : evaluateRotation(sortedConnections, snapshots, policy, {provider,model:rotationModel});
       resetPrioritySummary = rotationPreviewInfo(evaluation, snapshots, policy, {provider,model:rotationModel,now:Date.now()}).creditSummary;
       rotationHints = Object.fromEntries(evaluation.ranked.filter(row => row.urgent).map(row => [row.connection.id,{expiresAt:row.expiry}]));
-      sortedConnections = [...evaluation.ranked.map(row => row.connection), ...evaluation.waiting.map(row => row.connection), ...(evaluation.blocked || []).map(row => row.connection)];
-      rotationSegments = evaluation.segments.map(segment => ({key:segment.key,ids:segment.rows.map(row=>row.connection.id),boundaries:segment.boundaries,unavailableIds:segment.rows.filter(row=>applicableRotationQuotas(snapshots[row.connection.id],provider,rotationModel).some(quota=>quota.remaining===0)).map(row=>row.connection.id),rotationName:segment.key.startsWith("reset")?"Expiring credit":"Rotation segment"}));
-      if (evaluation.waiting.length) rotationSegments.push({key:"waiting", ids:evaluation.waiting.map(row=>row.connection.id), boundaries:[], rotationName:"Waiting"});
-      if (evaluation.blocked?.length) rotationSegments.push({key:"unavailable", ids:evaluation.blocked.map(row=>row.connection.id), boundaries:[], rotationName:"Not eligible"});
+      // Card sorting includes every account. Request admission remains in rotationPool.
+      const displayOrder = evaluateRotation(sortedConnections, snapshots, policy, {provider,model:rotationModel,includeExhausted:true});
+      const unavailable = new Set([...evaluation.waiting, ...(evaluation.blocked || [])].map(row=>row.connection.id));
+      sortedConnections = displayOrder.ranked.map(row=>row.connection);
+      rotationSegments = displayOrder.segments.map(segment => ({
+        key:segment.key,
+        ids:segment.rows.map(row=>row.connection.id),
+        boundaries:segment.boundaries,
+        unavailableIds:segment.rows.filter(row=>unavailable.has(row.connection.id)||applicableRotationQuotas(snapshots[row.connection.id],provider,rotationModel).some(quota=>quota.remaining===0)).map(row=>row.connection.id),
+        rotationName:segment.key.startsWith("reset")?"Expiring credit":"Rotation segment",
+      }));
     }
     if (searchParams.has("resetPriority") && !searchParams.has("rotationPolicy")) {
       const encoded = searchParams.get("resetPriority");

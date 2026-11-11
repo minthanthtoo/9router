@@ -121,12 +121,14 @@
       "entrypoints": [
         "src/shared/services/automaticCreditReset.js",
         "src/app/(dashboard)/dashboard/quota/quotaPins.mjs",
-        "src/shared/components/QuotaSortBar.js"
+        "src/shared/components/QuotaSortBar.js",
+        "src/app/api/providers/client/route.js"
       ],
       "tests": [
         "tests/rotation/automatic-reset.test.mjs",
         "tests/rotation/card-segments.test.mjs",
-        "tests/rotation/ui.test.mjs"
+        "tests/rotation/ui.test.mjs",
+        "tests/rotation/integration.test.mjs"
       ]
     }
   ]

@@ -267,8 +267,8 @@ test('waiting preview and routing agree without advancing cursors, including emp
   const url = new URL('http://localhost/api/providers/client');
   for (const [key,value] of Object.entries({provider:'codex',includeImageAccounts:'true',rotationModel:'gpt-6.1',rotationPolicy:JSON.stringify(policy)})) url.searchParams.set(key,value);
   const cards = await (await clientRoute.GET(new Request(url))).json();
-  assert.equal(cards.rotationSegments.at(-1).rotationName, 'Waiting');
-  assert.equal(cards.connections.at(-1).id, active[0].id);
+  assert.ok(cards.rotationSegments.flatMap(segment=>segment.unavailableIds).includes(active[0].id));
+  assert.equal(cards.connections.length, active.length);
   await write(true);
   // No sort evidence is also the legacy fallback path; zero must not re-enter it.
   const unknown = { ...policy, sorts: policy.sorts.slice(0, 1) };
@@ -317,7 +317,7 @@ test('custom image account sequence remains independent of text and none preserv
  const cardURL=new URL('http://localhost/api/providers/client');
  for(const [key,value]of Object.entries({provider:'codex',includeImageAccounts:'true',rotationModel:'gpt-image-2.5',rotationPolicy:JSON.stringify(config)}))cardURL.searchParams.set(key,value);
  const cardResult=await clientRoute.GET(new Request(cardURL));assert.equal(cardResult.status,200);const cardData=await cardResult.json();
- assert.equal(cardData.rotationSegments.flatMap(segment=>segment.rotationName==='Not eligible'?segment.ids:[]).length,4,JSON.stringify(cardData.rotationSegments));
+ assert.equal(cardData.rotationSegments.flatMap(segment=>segment.unavailableIds).length,4,JSON.stringify(cardData.rotationSegments));
  assert.deepEqual(db.all('SELECT * FROM aurixImageRoutingCursors'),cursors);
 
  const {rotationAutomationStatus}=await import(new URL('src/shared/services/rotationSnapshotRefresh.js',root));
@@ -487,4 +487,28 @@ test('namespaced model quota exhaustion protects admission without enabling cust
   assert.equal(pool.admission[1].ready,1);assert.equal(pool.admission[2].ready,0);
  }
  assert.equal(rotationPool([c],snapshots,engine.emptyRotation(),{provider:c.provider,model:'other/gemini-pro',now,quotaAdmission:true}).ranked.length,1);
+});
+
+test('quota card weekly reset sort orders every account before availability grouping and pagination',async()=>{
+ const active=await Promise.all(connections.map(c=>getProviderConnectionById(c.id)));
+ db.run("DELETE FROM providerConnections WHERE provider='codex' AND id NOT IN (?,?,?,?)",active.map(c=>c.id));
+ const now=Date.now(),days=[7,6,5,1];
+ for(let i=0;i<active.length;i++){
+  await updateProviderConnection(active[i].id,{isActive:i!==3});
+  const current=await getProviderConnectionById(active[i].id);
+  db.run('DELETE FROM providerRotationSnapshots WHERE connectionId=?',[current.id]);
+  await repo.recordRotationUsage(current,{quotas:{session:{total:100,used:i===1||i===2?100:0,resetAt:new Date(now+3600000).toISOString()},weekly:{total:100,used:i===3?100:40,resetAt:new Date(now+days[i]*86400000).toISOString()}}},Date.now());
+ }
+ const client=await import(new URL('src/app/api/providers/client/route.js',root));
+ for(const direction of ['asc','desc']){
+  const policy={...config,sorts:[{key:'weekly-reset',direction,division:'half'}],resetPriority:{enabled:false,days:3,weeklyBelow:null}};
+  const url=new URL('http://localhost/api/providers/client');
+  for(const [key,value] of Object.entries({provider:'codex',includeImageAccounts:'true',rotationModel:'gpt-6.1',rotationPolicy:JSON.stringify(policy),pageSize:'2'}))url.searchParams.set(key,value);
+  const result=await(await client.GET(new Request(url))).json();
+  const expected=direction==='asc'?[3,2,1,0]:[0,1,2,3];
+  assert.deepEqual(result.connections.map(c=>c.id),expected.slice(0,2).map(i=>active[i].id));
+  url.searchParams.set('page','2');
+  const second=await(await client.GET(new Request(url))).json();
+  assert.deepEqual(second.connections.map(c=>c.id),expected.slice(2).map(i=>active[i].id));
+ }
 });

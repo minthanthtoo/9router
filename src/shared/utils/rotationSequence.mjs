@@ -147,7 +147,7 @@ export function resetCreditPriority(connection, snapshot, policy, { provider, mo
   return Boolean(fresh && credits?.availableCount > 0 && Number.isFinite(credits.observedAt) && now >= credits.observedAt && now - credits.observedAt <= SNAPSHOT_MAX_AGE_MS && credits.expiresAt > now && credits.expiresAt <= now + policy.resetPriority.days * 86400000 && (policy.resetPriority.weeklyBelow === null || weekly !== null && weekly <= policy.resetPriority.weeklyBelow));
 }
 
-export function evaluateRotation(connections, snapshots, policy, { provider, model = '', now = Date.now(), onStep }) {
+export function evaluateRotation(connections, snapshots, policy, { provider, model = '', now = Date.now(), onStep, includeExhausted = false }) {
   policy = validateRotation(policy, provider);
   const metrics = rotationMetrics(provider), rules = policy.sorts.map(sort => ({ ...metrics.find(metric => metric.key === sort.key), ...sort }));
   const rows = connections.map(connection => {
@@ -164,7 +164,7 @@ export function evaluateRotation(connections, snapshots, policy, { provider, mod
     const skipped = resetPriority || !rule || group.every(row => row.values[depth] === null);
     const ordered = resetPriority ? group : skipped ? group : [...group].sort((a, b) => a.values[depth] === b.values[depth] ? 0 : a.values[depth] === null ? 1 : b.values[depth] === null ? -1 : (a.values[depth] - b.values[depth]) * (rule.direction === 'asc' ? 1 : -1));
     // Demote after the first ordering, before a split can let exhausted rows change its boundary.
-    const waitingRows = depth === 0 ? ordered.filter(row => !(row.urgent && policy.resetPriority.autoReset) && rotationValue(snapshots[row.connection.id], { window: 'session', kind: 'remaining' }, provider, model, now) === 0) : [];
+    const waitingRows = !includeExhausted && depth === 0 ? ordered.filter(row => !(row.urgent && policy.resetPriority.autoReset) && rotationValue(snapshots[row.connection.id], { window: 'session', kind: 'remaining' }, provider, model, now) === 0) : [];
     waiting.push(...waitingRows.map(row => ({ ...row, reason: 'Short window exhausted' })));
     const ready = waitingRows.length ? ordered.filter(row => !waitingRows.includes(row)) : ordered;
     const children = !resetPriority && rule && !skipped && depth + 1 < rules.length && ready.length > 1 ? partitionRotationRows(ready, depth, rule.direction, rules[depth + 1].division).map(({ rows, detail }, index) => ({ rows, path: `${path}.${index + 1}`, boundaries: [...boundaries, { ...detail, label: rule.label, kind: rule.kind, key: rule.key, direction: rule.direction }] })) : null;
