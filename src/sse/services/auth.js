@@ -284,6 +284,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     const textPolicies = options?.capability === 'chat' ? await readTextModelPolicies(connections) : null;
     const admissionSnapshots = options?.capability==='chat' || quotaAwareImage ? await readRotationSnapshots(connections) : {};
     const requestState = options?.requestState || {};
+    requestState.unavailableReason=null;
     if(options?.capability==='chat' && !requestState.textRotationPolicy) requestState.textRotationPolicy=structuredClone((await getSettings()).providerStrategies?.[providerId]?.rotationSequence || emptyRotation());
     const automaticResetBlocked = new Set();
     let automaticResetReady = null;
@@ -421,6 +422,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     });
 
     if (availableConnections.length === 0) {
+      if(options?.capability==='chat') requestState.unavailableReason="No account can serve the requested model right now.";
       if (quotaAwareImage) {
         const unpausedConnections = connections.filter((connection) => !imageQuotaStateFor(connection, quotaStates).manualPolicy);
         const allQuotaBlocked = unpausedConnections.length > 0 && unpausedConnections.every((connection) => {
@@ -527,7 +529,10 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
           stickyRequests: strategy === "round-robin" ? (providerOverride.stickyRoundRobinLimit || settings.stickyRoundRobinLimit || 3) : 1,
           peekOnly: Boolean(options?.peekOnly),
         });
-        if (!connection && !availableConnections.length) return null;
+        if (!connection && !availableConnections.length) {
+          if(options?.capability==='chat') requestState.unavailableReason=`No eligible account: ${pool.blocked[0]?.reason || pool.waiting[0]?.reason || 'quota or model access unavailable'}.`;
+          return null;
+        }
       } catch (error) { log.warn("ROTATION", `Sequence unavailable; using existing strategy: ${error.message}`); }
     }
     if (connection) {

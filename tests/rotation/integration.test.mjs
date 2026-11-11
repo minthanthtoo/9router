@@ -585,6 +585,7 @@ test('live text dispatch skips unsupported free plans, honors current empty quot
   await repo.recordRotationUsage(paid,{...usage(0),plan:'plus'});
   const noCapacity=await getProviderCredentials('codex',others,'premium-model',options);
   assert.equal(noCapacity,null);
+  assert.match(options.requestState.unavailableReason,/Quota exhausted/);
   assert.equal(JSON.stringify(options.requestState.textRotationPolicy),revision);
   assert.equal(await getProviderCredentials('codex',new Set([...others,paid.id]),'premium-model',options),null);
  }finally{
