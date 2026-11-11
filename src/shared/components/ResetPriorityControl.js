@@ -47,7 +47,7 @@ export default function ResetPriorityControl({ value, onChange, disabled = false
       onClick={() => setOpen(true)}
       className={`relative inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-sm transition-colors ${value.enabled ? 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400' : 'border-border text-text-muted hover:bg-surface-2'}`}
     >
-      <span aria-hidden="true" className="relative inline-flex w-6 items-center"><span className="material-symbols-outlined text-[20px]">restart_alt</span><span className="material-symbols-outlined absolute -right-1 -top-1 rounded-full bg-surface text-[12px]">arrow_upward</span></span>
+      <span aria-hidden="true" className="inline-flex shrink-0 items-center gap-0.5"><span className="material-symbols-outlined" style={{fontSize:22}}>restart_alt</span><span className="material-symbols-outlined opacity-70" style={{fontSize:13}}>arrow_upward</span></span>
       <span className="quota-sort-label">Reset first</span>{value.enabled&&<span aria-hidden="true" className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-semibold text-black">1</span>}
       <span className={`rounded-full px-1.5 text-[10px] font-medium ${value.enabled ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'bg-surface-2 text-text-muted'}`}>{value.enabled ? `≤${value.days}d${value.weeklyBelow===null?'':` · ≤${value.weeklyBelow}%`}` : 'Off'}</span>
     </button>

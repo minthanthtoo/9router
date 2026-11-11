@@ -88,7 +88,7 @@
         "tests/rotation/card-segments.test.mjs",
         "tests/rotation/integration.test.mjs"
       ],
-      "notes": "Plan badges share the provider heading line. Segment boundaries retain exact accessible descriptions while rendering metric, quota-colored range and division tags; compact sticky headers retain metric/range emphasis."
+      "notes": "Plan badges share the provider heading. Distinct section surfaces/availability edges lead; quieter metric and division descriptions retain quota-colored ranges and exact accessible text. Compact sticky headers share this hierarchy. Quota-page-only grid/action-icon sizing reduces competing visual weight."
     },
     {
       "id": "codex-consented-reset",

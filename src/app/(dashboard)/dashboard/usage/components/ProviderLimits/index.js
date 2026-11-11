@@ -958,7 +958,7 @@ export default function ProviderLimits() {
   const pageSizeLabel = getPageSizeLabel(pageSize, isCustomPageSize);
 
   return (
-    <div ref={quotaRoot} className="space-y-2">
+    <div ref={quotaRoot} className="quota-workspace space-y-2">
       {rotationScope && <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-text-muted">
         {rotationScope && <><span>{providerSequence?.provider===providerFilter?"Provider sequence":"Rotation preview"} · {rotationPreview.model||"all models"}</span><button type="button" className="text-primary underline" onClick={() => setRotationPreview(null)}>Return to card sorting</button></>}
       </div>}
