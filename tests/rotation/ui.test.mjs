@@ -151,12 +151,12 @@ test('availability grouping control works with zero, one and multiple sorts',asy
 });
 
 
-test('reset step shifts quota priorities and enables division before the first quota sort',async()=>{
+test('reset step shifts quota priorities and uses criteria groups before the first quota sort',async()=>{
  const React=requireFront('react'),{render,screen,cleanup}=requireFront('@testing-library/react');
  const Bar=await harness('QuotaSortBar');
  const {rotationMetrics}=await import('../../src/shared/utils/rotationSequence.mjs');
  render(React.createElement(Bar,{provider:'codex',resetPriority:true,sorts:[{key:'weekly-reset',direction:'asc',division:'gap'}],options:rotationMetrics('codex'),onChange:()=>{}}));
  assert.ok(screen.getByRole('button',{name:'Weekly reset: Earliest first, priority 2'}));
- assert.equal(screen.getByRole('button',{name:'Divide before Weekly reset: Largest gap'}).disabled,false);
+ assert.equal(screen.queryByRole('button',{name:'Divide before Weekly reset: Largest gap'}),null);
  cleanup();
 });

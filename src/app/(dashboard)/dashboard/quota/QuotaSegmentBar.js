@@ -9,10 +9,10 @@ export default function QuotaSegmentBar({ segment, index, total, previous, next,
   const timer=setInterval(()=>{if(!document.hidden)setCurrent(value=>(value+1)%details.length);},3500);
   return()=>clearInterval(timer);
  },[compact,details.length,paused,hover]);
- const name=(segment.availability||['ready','unavailable'].includes(segment.key))?segment.rotationName:segment.key==='disabled'?'Disabled accounts':segment.key==='pinned'?'Pinned':segment.rotationName ? `${segment.rotationName} ${index+1}` : `Segment ${segment.key}`;
+ const name=(segment.resetGroup||segment.availability||['ready','unavailable'].includes(segment.key))?segment.rotationName:segment.key==='disabled'?'Disabled accounts':segment.key==='pinned'?'Pinned':segment.rotationName ? `${segment.rotationName} ${index+1}` : `Segment ${segment.key}`;
  return <div className={`quota-segment-bar col-span-full min-w-0 ${compact?'is-compact':''} ${covered?'invisible':''}`} inert={covered} aria-hidden={covered || undefined} onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)} onFocus={()=>setHover(true)} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setHover(false);}}>
   <div className="quota-segment-heading flex min-w-0 items-center gap-2">
-   <span aria-hidden="true" className="material-symbols-outlined shrink-0 text-primary" style={{fontSize:18}}>{segment.key==='pinned'?'push_pin':'account_tree'}</span>
+   <span aria-hidden="true" className="material-symbols-outlined shrink-0 text-primary" style={{fontSize:18}}>{segment.resetGroup&&segment.resetGroup!=='regular'?'restart_alt':segment.key==='pinned'?'push_pin':'account_tree'}</span>
    <h2 id={headingId || `quota-segment-${segment.key}`} className="truncate text-xs font-semibold text-text-main">{name}</h2>
    <span className="shrink-0 text-xs tabular-nums text-text-muted">{segment.connections.length} {segment.connections.length===1?'card':'cards'}</span>
    {compact&&details.length>0&&<button type="button" className="quota-segment-ticker min-w-0 flex-1 text-left" aria-label={`Next segment detail. ${details.join("; ")}`} onClick={()=>{setPaused(true);setCurrent(value=>(value+1)%details.length);}} title={details.join('\n')}><span key={`${segment.key}-${current}`} className="quota-segment-tick text-xs text-text-muted" aria-hidden="true">{details[current%details.length]}</span><span className="sr-only">{details.join('; ')}</span></button>}

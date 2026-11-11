@@ -43,13 +43,13 @@ export default function ResetPriorityControl({ value, onChange, disabled = false
       aria-expanded={open}
       aria-pressed={value.enabled}
       aria-label={`Codex credit priority: ${value.enabled ? `on, expires within ${value.days} days` : 'off'}`}
-      title={value.enabled ? `Credit priority on · earliest credit-expiry group first · within ${value.days} days` : "Credit priority off · configure expiring reset credits"}
+      title={value.enabled ? `Credit priority on · matching credits first · within ${value.days} days` : "Credit priority off · configure expiring reset credits"}
       onClick={() => setOpen(true)}
-      className={`inline-flex h-9 relative shrink-0 items-center gap-1 rounded-lg border px-2 text-sm transition-colors ${value.enabled ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-text-muted hover:bg-surface-2'}`}
+      className={`relative inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-sm transition-colors ${value.enabled ? 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400' : 'border-border text-text-muted hover:bg-surface-2'}`}
     >
-      <span aria-hidden="true" className={`material-symbols-outlined text-[18px] ${value.enabled ? 'text-amber-500' : ''}`}>restart_alt</span>
-      <span aria-hidden="true" className="material-symbols-outlined text-[14px]">arrow_upward</span><span className="quota-sort-label">Credit expiry</span>{value.enabled&&<span aria-hidden="true" className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-semibold text-black">1</span>}
-      <span className={`rounded-full px-1.5 text-[10px] font-medium ${value.enabled ? 'bg-primary/15 text-primary' : 'bg-surface-2 text-text-muted'}`}>{value.enabled ? `≤${value.days}d` : 'Off'}</span>
+      <span aria-hidden="true" className="relative inline-flex w-6 items-center"><span className="material-symbols-outlined text-[20px]">restart_alt</span><span className="material-symbols-outlined absolute -right-1 -top-1 rounded-full bg-surface text-[12px]">arrow_upward</span></span>
+      <span className="quota-sort-label">Reset first</span>{value.enabled&&<span aria-hidden="true" className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-semibold text-black">1</span>}
+      <span className={`rounded-full px-1.5 text-[10px] font-medium ${value.enabled ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'bg-surface-2 text-text-muted'}`}>{value.enabled ? `≤${value.days}d${value.weeklyBelow===null?'':` · ≤${value.weeklyBelow}%`}` : 'Off'}</span>
     </button>
     {open && createPortal(
       <Modal isOpen onClose={() => setOpen(false)} title="Codex credit priority" size="sm">
@@ -58,9 +58,9 @@ export default function ResetPriorityControl({ value, onChange, disabled = false
             <div className="flex items-center gap-2 text-sm font-medium text-text-main">
               <span aria-hidden="true" className="material-symbols-outlined text-amber-500">restart_alt</span>
               Codex user allowance
-              <ImageHelp label="Credit priority"><p>Uses the latest saved Codex allowance read. Available reset credits that expire inside the selected window form groups by earliest expiry. Later quota sorts reorder accounts inside each group. Accounts that do not match remain eligible and continue through the quota sorts. Automatic reset spends one available credit only when no ordinarily eligible account remains and the selected account has an exhausted applicable allowance. Requests wait for confirmed quota recovery. Unknown reset results are held for review.</p></ImageHelp>
+              <ImageHelp label="Credit priority"><p>Uses the latest saved Codex allowance read. Accounts form three groups in order: reset credits matching both conditions, other usable reset credits, and no usable reset credits. Availability groups stay inside each reset group. Later quota sorts order accounts within these groups. Missing or expired credit observations count as no usable reset credits until refreshed. Automatic reset spends one available credit only when no ordinarily eligible account remains and the selected account has an exhausted applicable allowance. Requests wait for confirmed quota recovery. Unknown reset results are held for review.</p></ImageHelp>
             </div>
-            <p className="mt-2 text-xs text-text-muted">Expiring credits form the first groups. Later sorts order accounts inside each group.</p>
+            <p className="mt-2 text-xs text-text-muted">Matching resets → Other resets → No resets</p>
           </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" role="switch" checked={value.enabled} disabled={disabled} onChange={event => onChange({ ...value, enabled: event.target.checked })} />

@@ -146,11 +146,12 @@ export async function GET(request) {
       const displayPolicy = {...policy, enabled: policy.sorts.length > 0 || policy.resetPriority.enabled};
       const displayOrder = evaluateRotation(sortedConnections, snapshots, displayPolicy, {provider,model:rotationModel,includeExhausted:true});
       resetPrioritySummary = {...resetPrioritySummary, enabled: displayPolicy.resetPriority.enabled, matching: displayOrder.ranked.filter(row=>row.urgent).length};
-      rotationHints = Object.fromEntries(displayOrder.ranked.filter(row=>row.urgent).map(row=>[row.connection.id,{expiresAt:row.expiry}]));
+      rotationHints = Object.fromEntries(displayOrder.ranked.filter(row=>row.resetGroup).map(row=>[row.connection.id,{group:row.resetGroup,expiresAt:row.expiry}]));
       const unavailable = new Set([...evaluation.waiting, ...(evaluation.blocked || [])].map(row=>row.connection.id));
       sortedConnections = displayOrder.ranked.map(row=>row.connection);
       rotationSegments = displayOrder.segments.map(segment => ({
         key:segment.key,
+        resetGroup:segment.resetGroup,
         ids:segment.rows.map(row=>row.connection.id),
         boundaries:segment.boundaries,
         unavailableIds:segment.rows.filter(row=>unavailable.has(row.connection.id)||applicableRotationQuotas(snapshots[row.connection.id],provider,rotationModel).some(quota=>quota.remaining===0)).map(row=>row.connection.id),
@@ -171,9 +172,9 @@ export async function GET(request) {
       const display = evaluateRotation(codex,snapshots,policy,{provider:'codex',model,now,includeExhausted:true});
       const urgent = display.ranked.filter(row => row.urgent);
       resetPrioritySummary = {...resetPrioritySummary,enabled:true,matching:urgent.length};
-      rotationHints = Object.fromEntries(urgent.map(row => [row.connection.id,{expiresAt:row.expiry}]));
+      rotationHints = Object.fromEntries(display.ranked.filter(row=>row.resetGroup).map(row => [row.connection.id,{group:row.resetGroup,expiresAt:row.expiry}]));
       // Promote across the entire result before pagination; local card sorts stay inside this group.
-      sortedConnections = [...urgent.map(row => row.connection),...sortedConnections.filter(connection => !rotationHints[connection.id])];
+      sortedConnections = [...display.ranked.map(row=>row.connection),...sortedConnections.filter(connection=>connection.provider!=='codex')];
     }
     if (resetPrioritySummary) {
       const {policy:saved} = await readRotationPolicy('codex');

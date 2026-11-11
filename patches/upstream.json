@@ -71,7 +71,9 @@
         "src/app/(dashboard)/dashboard/quota/QuotaSegmentBar.js",
         "src/app/(dashboard)/dashboard/usage/components/ProviderLimits/index.js",
         "src/app/api/providers/client/route.js",
-        "src/shared/components/ResetPriorityControl.js"
+        "src/shared/components/ResetPriorityControl.js",
+        "src/app/(dashboard)/dashboard/quota/QuotaControlDock.js",
+        "src/app/(dashboard)/dashboard/usage/components/ProviderLimits/utils.js"
       ],
       "tests": [
         "tests/rotation/card-models.test.mjs",

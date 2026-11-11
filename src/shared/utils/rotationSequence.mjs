@@ -4,6 +4,11 @@ import { canonicalTextModel } from './textModelPermission.mjs';
 export const ROTATION_VERSION = 1;
 export const SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
 export const DIVISIONS = ['half', 'median', 'gap'];
+export const RESET_GROUPS = [
+  {key:'reset',label:'Reset · Matches'},
+  {key:'reset-other',label:'Reset · Outside criteria'},
+  {key:'regular',label:'No reset credits'},
+];
 const WINDOWS = {
   codex: ['session', 'weekly'], claude: ['session', 'weekly'], antigravity: ['session', 'weekly', 'model'],
   'gemini-cli': ['model'], minimax: ['session', 'weekly'], 'minimax-cn': ['session', 'weekly'],
@@ -153,22 +158,20 @@ export function evaluateRotation(connections, snapshots, policy, { provider, mod
   const rows = connections.map(connection => {
     const snapshot = snapshots[connection.id];
     const fresh = snapshot?.provider === provider && Number.isFinite(snapshot.observedAt) && now >= snapshot.observedAt && now - snapshot.observedAt <= SNAPSHOT_MAX_AGE_MS;
-    const expiry = fresh && snapshot.credits?.availableCount > 0 && Number.isFinite(snapshot.credits.observedAt) && now >= snapshot.credits.observedAt && now - snapshot.credits.observedAt <= SNAPSHOT_MAX_AGE_MS ? snapshot.credits.expiresAt : null;
+    const expiry = fresh && snapshot.credits?.availableCount > 0 && snapshot.credits.expiresAt > now && Number.isFinite(snapshot.credits.observedAt) && now >= snapshot.credits.observedAt && now - snapshot.credits.observedAt <= SNAPSHOT_MAX_AGE_MS ? snapshot.credits.expiresAt : null;
     const urgent = resetCreditPriority(connection, snapshot, policy, { provider, model, now });
-    return { connection, values: rules.map(rule => rotationValue(snapshot, rule, provider, model, now)), urgent, expiry, fresh };
+    const resetGroup = policy.enabled && policy.resetPriority.enabled && provider === 'codex' && scopeMatches(provider,'codex:main',model) ? urgent ? 'reset' : expiry ? 'reset-other' : 'regular' : null;
+    return { connection, values: rules.map(rule => rotationValue(snapshot, rule, provider, model, now)), urgent, expiry, fresh, resetGroup };
   });
   const segments = [], waiting = [];
   const urgent = rows.filter(row => row.urgent).sort((a,b)=>a.expiry-b.expiry);
   const regular = rows.filter(row => !row.urgent);
-  let creditGroups = urgent.length ? [{path:'reset',rows:urgent,boundaries:[]}] : [];
-  if (rules.length && urgent.length > 1) {
-    const creditRows = urgent.map(row=>({row,values:[row.expiry]}));
-    creditGroups = partitionRotationRows(creditRows,0,'asc',rules[0].division).map(({rows:group,detail},index)=>({
-      path:`reset.${index+1}`,
-      rows:group.map(item=>item.row),
-      boundaries:[{...detail,label:'Credit expiry',kind:'reset',key:'credit-expiry',direction:'asc'}],
-    }));
-  }
+  const creditGroups = RESET_GROUPS.map(({key,label})=>({
+    path:key,
+    note:label,
+    rows:rows.filter(row=>row.resetGroup===key).sort((a,b)=>(a.expiry??Infinity)-(b.expiry??Infinity)),
+    boundaries:[],
+  })).filter(group=>group.rows.length);
   onStep?.({ initial: true, rows, urgent, regular, creditGroups });
   const descend = (group, depth, path, boundaries) => {
     const rule = rules[depth];
@@ -182,12 +185,12 @@ export function evaluateRotation(connections, snapshots, policy, { provider, mod
     onStep?.({ depth, path, rows: ordered, ready, waiting: waitingRows, boundaries, children, skipped });
     if (children) children.forEach(child => descend(child.rows, depth + 1, child.path, child.boundaries));
     else if (rule && depth + 1 < rules.length) descend(ready, depth + 1, path, boundaries);
-    else if (ready.length) segments.push({ key: path, rows: ready, boundaries });
+    else if (ready.length) segments.push({ key: path, rows: ready, boundaries, resetGroup:ready[0].resetGroup });
   };
   if (!policy.enabled) { if (rows.length) segments.push({ key: 'regular', rows, boundaries: [] }); }
   else {
-    creditGroups.forEach(group=>descend(group.rows,0,group.path,group.boundaries));
-    descend(regular, 0, 'regular', []);
+    if (creditGroups.length) creditGroups.forEach(group=>descend(group.rows,0,group.path,group.boundaries));
+    else descend(rows, 0, 'regular', []);
   }
   const hasEvidence = rows.some(row => row.urgent || row.values.some(value => value !== null));
   return { hasEvidence, segments, waiting, ranked: segments.flatMap(segment => segment.rows), candidates: segments[0]?.rows.map(row => row.connection) || [], staleCount: rows.filter(row => !row.fresh).length };

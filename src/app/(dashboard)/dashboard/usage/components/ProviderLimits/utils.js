@@ -1,4 +1,4 @@
-import { partitionRotationRows } from "@/shared/utils/rotationSequence.mjs";
+import { partitionRotationRows, RESET_GROUPS } from "@/shared/utils/rotationSequence.mjs";
 import { getModelsByProviderId } from "open-sse/config/providerModels.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -187,12 +187,13 @@ function groupByProviderStable(connections) {
 export function segmentVisibleConnections(connections, quotaData, sorts = [], now = Date.now()) {
   const rules = sorts.map(sort => ({ ...QUOTA_SORT_OPTIONS.find(option => option.key === sort.key), direction: sort.direction, division: sort.division || "half" }))
     .filter(rule => rule.key && ["asc", "desc"].includes(rule.direction));
-  const priority = connections.filter(connection => connection.rotationHint);
-  const regular = connections.filter(connection => !connection.rotationHint);
-  if (!rules.length) return priority.length ? [
-    {key:"reset",rotationName:"Expiring credit",connections:priority},
-    ...(regular.length ? [{key:"regular",rotationName:"Other accounts",connections:groupByProviderStable(regular)}] : []),
-  ] : [{ key: "all", connections: groupByProviderStable(connections) }];
+  const resetActive = connections.some(connection=>connection.rotationHint);
+  const resetGroups = RESET_GROUPS.map(({key,label})=>({
+    key,resetGroup:key,rotationName:label,
+    connections:connections.filter(connection=>(connection.rotationHint?.group || (connection.rotationHint?'reset':'regular'))===key),
+    boundaries:[],
+  })).filter(group=>group.connections.length);
+  if (!rules.length) return resetActive ? resetGroups : [{ key: 'all', connections: groupByProviderStable(connections) }];
   const rows = connections.map(connection => ({
     connection,
     values: rules.map(rule => {
@@ -220,12 +221,7 @@ export function segmentVisibleConnections(connections, quotaData, sorts = [], no
     return ordered.length ? [{ key: path.join(".") || "1", connections: ordered.map(row => row.connection), boundaries,
       ordering:{...rules[depth],mode:"half",startRank:1,endRank:ordered.length,parentCount:ordered.length,...quotaValueRange(ordered,depth)} }] : [];
   };
-  return priority.length ? [
-    ...describeQuotaDivision(rows.filter(row=>row.connection.rotationHint).map(row=>({row,values:[Date.parse(row.connection.rotationHint.expiresAt)]})),0,"asc",rules[0].division)
-      .flatMap(({rows:group,detail},index)=>descend(group.map(item=>item.row),0,["reset",index+1],[{...detail,key:"credit-expiry",label:"Credit expiry",kind:"reset",direction:"asc"}]))
-      .map(segment=>({...segment,rotationName:"Expiring credit"})),
-    ...descend(rows.filter(row => !row.connection.rotationHint),0,["regular"],[]).map(segment => ({...segment,rotationName:"Other accounts"})),
-  ] : descend(rows,0,[],[]);
+  return resetActive ? resetGroups.flatMap(group=>descend(rows.filter(row=>group.connections.includes(row.connection)),0,[group.key],[]).map(segment=>({...segment,resetGroup:group.key,rotationName:group.rotationName}))) : descend(rows,0,[],[]);
 }
 
 export function sortVisibleConnections(connections, quotaData, sorts = [], now = Date.now()) {

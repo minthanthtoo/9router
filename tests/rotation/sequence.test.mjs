@@ -96,7 +96,7 @@ test('card sorting never lifts ordinary accounts above the reset-priority group'
   for(const sorts of [[],[{key:'weekly-remaining',direction:'desc',division:'half'}]]) {
     const groups=segmentVisibleConnections(accounts,quotas,sorts,now);
     assert.equal(groups[0].connections[0].id,'reset');
-    assert.equal(groups[0].rotationName,'Expiring credit');
+    assert.equal(groups[0].rotationName,'Reset · Matches');
     assert.equal(groups.flatMap(group=>group.connections).length,2);
   }
 });
@@ -173,12 +173,13 @@ test('availability grouping defaults on at two sorts, supports opt-out and reset
 });
 
 
-test('credit expiry is a grouped first step and quota rules sort inside its partitions',()=>{
- const ids=['0','1','2','3'];
- const data=Object.fromEntries(ids.map((id,i)=>[id,{...snapshot([90,10,80,20][i]),credits:{availableCount:1,observedAt:now,expiresAt:now+(i+1)*3600000}}]));
- const config={...policy([{key:'weekly-remaining',direction:'asc',division:'half'}]),resetPriority:{enabled:true,days:3,weeklyBelow:null}};
- const result=evaluate(connections.slice(0,4),data,config);
- assert.deepEqual(result.segments.map(s=>s.rows.map(r=>r.connection.id)),[['1','0'],['3','2']]);
- assert.equal(result.segments[0].boundaries[0].key,'credit-expiry');
- assert.equal(result.segments[0].boundaries[0].mode,'half');
+test('reset criteria create exactly three roots and later sorts stay inside each root',()=>{
+ const data=Object.fromEntries(connections.map((c,i)=>[c.id,{...snapshot([90,10,80,20,70,30,60,40][i]),credits:i<6?{availableCount:1,observedAt:now,expiresAt:now+(i<4?1:5)*86400000}:null}]));
+ data['3'].quotas.find(q=>q.window==='session').remaining=0;
+ const config={...policy([{key:'weekly-remaining',direction:'asc',division:'half'}]),resetPriority:{enabled:true,days:3,weeklyBelow:50}};
+ const result=evaluateRotation(connections,data,config,{provider:'codex',model:'gpt-6.1',now,includeExhausted:true});
+ assert.deepEqual(result.segments.map(s=>[s.resetGroup,s.rows.map(r=>r.connection.id)]),[['reset',['1','3']],['reset-other',['5','4','2','0']],['regular',['7','6']]]);
+ assert.ok(result.segments.every(s=>s.boundaries.length===0));
+ const expired={...data['0'],credits:{...data['0'].credits,expiresAt:now-1}};
+ assert.equal(evaluate(connections.slice(0,1),{'0':expired},config).ranked[0].resetGroup,'regular');
 });

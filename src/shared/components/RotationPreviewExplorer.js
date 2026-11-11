@@ -6,6 +6,7 @@ import QuotaRemainingMeter, { quotaRemainingColors } from './QuotaRemainingMeter
 import ImageHelp from '../../app/(dashboard)/dashboard/quota/ImageHelp';
 import { rotationDirection, rotationMetricLabel } from '../utils/rotationPreview.mjs';
 import styles from './rotationExplorer.module.css';
+import {RESET_GROUPS} from '../utils/rotationSequence.mjs';
 const divisions = { half: 'Equal count', median: 'Median', gap: 'Largest gap' };
 const exact = value => new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 export function remainingTime(value, now) {
@@ -73,14 +74,14 @@ export default function RotationPreviewExplorer({ preview, current, dirty, now, 
   }, [playing, current, stageIndex, stages]);
   const pageChange = value => { setPlaying(false); setPage(value); root.current?.scrollIntoView({ block: 'start', behavior: 'instant' }); root.current?.focus({ preventScroll: true }); };
   const stageLabel = step => step.type === 'sort' ? `${step.ruleIndex + 1 + Number(preview.resetPriorityEnabled)} ${label(metrics.find(metric => metric.key === step.rule.key))} · ${rotationDirection(metrics.find(metric => metric.key === step.rule.key), step.rule.direction)}` : step.type === 'split' ? `Split: ${divisions[step.division]}` : step.label;
-  const groupName = (group, index) => group.waiting ? 'Waiting' : stage.type === 'final' ? preview.fallback ? 'Existing rotation' : group.preferred ? 'Preferred' : `Lower priority ${index + 1}` : group.key.startsWith('reset') ? `Expiring credits · Group ${index + 1}` : stage.type === 'eligible' ? 'Eligible accounts' : `Group ${index + 1}`;
+  const groupName = (group, index) => group.waiting ? 'Waiting' : stage.type === 'final' ? preview.fallback ? 'Existing rotation' : group.preferred ? 'Preferred' : `Lower priority ${index + 1}` : preview.resetPriorityEnabled ? (RESET_GROUPS.find(root=>group.key===root.key||group.key.startsWith(root.key+'.'))?.label||`Group ${index+1}`) : stage.type === 'eligible' ? 'Eligible accounts' : `Group ${index + 1}`;
   const scopes = [...new Set(preview.rows.map(row => row.scope).filter(Boolean))];
   const explanation = row => <div className={styles.explanation}>
     <p>{row.scope || 'Quota scope not reported'}</p>
     <ol>{stages.slice(0, stage.type === 'final' ? -1 : stageIndex + 1).filter(step => step.type !== 'eligible').map(step => {
       const group = step.groups.find(group => group.ids.includes(row.id)); if (!group) return null;
       const metric = step.rule && metrics.find(metric => metric.key === step.rule.key), value = metric && row.measurements?.[metric.key];
-      return <li key={step.id}><strong>{stageLabel(step)}</strong><span>{group.waiting ? 'Short window exhausted · excluded from later sorts and dispatch' : step.type === 'sort' ? `${Number.isFinite(value) ? metric.kind === 'remaining' ? pct(value) : remainingTime(value, preview.observedAt) : missing(row)} · rank ${group.ids.indexOf(row.id) + 1} of ${group.ids.length} in this group` : step.type === 'credits' ? group.key.startsWith('reset') ? 'Qualifying unspent credit with reported expiry' : 'Regular priority; no qualifying credit condition' : group.boundaries.at(-1) ? boundaryText(group.boundaries.at(-1), preview.observedAt) : group.note || 'No split'}{group.note && step.type === 'sort' && ` · ${group.note}`}</span></li>;
+      return <li key={step.id}><strong>{stageLabel(step)}</strong><span>{group.waiting ? 'Short window exhausted · excluded from later sorts and dispatch' : step.type === 'sort' ? `${Number.isFinite(value) ? metric.kind === 'remaining' ? pct(value) : remainingTime(value, preview.observedAt) : missing(row)} · rank ${group.ids.indexOf(row.id) + 1} of ${group.ids.length} in this group` : step.type === 'credits' ? (group.note || RESET_GROUPS.find(root=>group.key===root.key)?.label || 'Reset classification unavailable') : group.boundaries.at(-1) ? boundaryText(group.boundaries.at(-1), preview.observedAt) : group.note || 'No split'}{group.note && step.type === 'sort' && ` · ${group.note}`}</span></li>;
     })}</ol>
     <p>{row.waiting ? `${row.reason} · not dispatchable.` : preview.fallback ? 'Existing account selection is used.' : stage.type !== 'final' ? 'This is an intermediate step. Final shows the selected group.' : row.segment === 1 ? `Selected group · ${preview.strategy === 'round-robin' ? `round robin switches after ${preview.stickyRequests} request${preview.stickyRequests === 1 ? '' : 's'}` : 'first eligible account selection'}` : 'Lower priority; eligibility or ranking must change before this group supplies requests.'}</p>
     <time dateTime={row.observedAt ? new Date(row.observedAt).toISOString() : undefined}>{row.observedAt ? `Observed ${exact(row.observedAt)}${!row.fresh ? ' · Old observation' : ''}` : 'No observation'}</time>

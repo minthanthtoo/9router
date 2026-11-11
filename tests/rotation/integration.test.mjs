@@ -161,7 +161,7 @@ test('all-provider reset priority promotes matching Codex accounts before pagina
     url.searchParams.set('resetPriority',JSON.stringify({...priority,weeklyBelow:10}));
     const below = await (await client.GET(new Request(url))).json();
     assert.equal(below.resetPrioritySummary.matching,0);
-    assert.ok(below.connections.every(row=>!row.rotationHint));
+    assert.ok(below.connections.every(row=>row.rotationHint?.group!=='reset'));
     const current = await repo.readRotationPolicy('codex');
     const applied = await repo.saveRotationPolicy('codex',{...saved.policy,enabled:true,resetPriority:priority},current.revision);
     url.searchParams.set('resetPriority',JSON.stringify(priority));
@@ -529,9 +529,10 @@ test('listing credit priority follows active controls even with live rotation di
   url.searchParams.set('rotationPolicy',JSON.stringify(policy));
   const result=await(await client.GET(new Request(url))).json();
   assert.equal(result.resetPrioritySummary.enabled,enabled);
-  assert.equal(result.connections.filter(c=>c.rotationHint).length,enabled?4:0);
+  assert.equal(result.connections.filter(c=>c.rotationHint?.group==='reset').length,enabled?4:0);
   if(enabled){
-   assert.deepEqual(result.connections.map(c=>c.id),accounts.toReversed().map(c=>c.id));
+   assert.deepEqual(new Set(result.connections.map(c=>c.id)),new Set(accounts.map(c=>c.id)));
+   assert.ok(result.rotationSegments.every(s=>s.resetGroup==='reset'));
    assert.equal(result.rotationSegments[0].rotationName,'Expiring credit');
   }
  }

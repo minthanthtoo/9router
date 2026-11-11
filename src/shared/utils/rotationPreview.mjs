@@ -57,8 +57,8 @@ export function rotationStages(events, policy) {
   const pack = group => ({ key: group.path, ids: group.rows.map(row => row.connection.id), boundaries: group.boundaries || [], note: group.note || null, waiting: Boolean(group.waiting) });
   const stages = [{ id: 'eligible', type: 'eligible', label: 'Eligible', groups: [pack({ path: 'eligible', rows: initial.rows })] }];
   if (!policy.enabled) return stages;
-  let groups = [...(initial.creditGroups || [{path:'reset',rows:initial.urgent,boundaries:[]}]), { path: 'regular', rows: initial.regular, boundaries: [] }].filter(group => group.rows.length);
-  if (policy.resetPriority.enabled) stages.push({ id: 'credits', type: 'credits', label: '1 Credit expiry', groups: groups.map(pack) });
+  let groups = initial.creditGroups?.length ? initial.creditGroups : [{path:'regular',rows:initial.rows,boundaries:[]}];
+  if (policy.resetPriority.enabled) stages.push({ id: 'credits', type: 'credits', label: '1 Reset groups', groups: groups.map(pack) });
   const waiting = [];
   const packed = () => [...groups.map(pack), ...waiting.map(pack)];
   const demote = () => {

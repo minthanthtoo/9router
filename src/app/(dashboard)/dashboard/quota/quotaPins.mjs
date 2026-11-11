@@ -1,3 +1,4 @@
+import {RESET_GROUPS} from '@/shared/utils/rotationSequence.mjs';
 import {getConnectionQuotaRemaining} from '../usage/components/ProviderLimits/utils.js';
 export function pinnedQuotaSegments(segments,pins,demoteDisabled = true) {
  const disabled=demoteDisabled ? segments.flatMap(segment=>segment.connections).filter(connection=>connection.isActive===false) : [];
@@ -12,6 +13,18 @@ export function toggleQuotaPin(pins,id) {
 
 // Keep sequence boundaries visible inside optional availability groups.
 export function availabilityQuotaSegments(segments, pins, quotaData, enabled, authoritative = false, preservePartitions = false) {
+ if (segments.some(segment=>segment.resetGroup)) {
+  return RESET_GROUPS.flatMap(({key,label})=>{
+   const members=segments.filter(segment=>segment.resetGroup===key);
+   const connections=members.flatMap(segment=>segment.connections);
+   if(!connections.length)return [];
+   const group={key,connections,boundaries:[],unavailableIds:members.flatMap(segment=>segment.unavailableIds||[])};
+   return availabilityQuotaSegments([group],pins,quotaData,enabled,authoritative,false).map(segment=>({
+    ...segment,key:`${key}-${segment.key}`,resetGroup:key,
+    rotationName:enabled?`${label} · ${segment.key==='ready'?'Ready':'Unavailable'}`:label,
+   }));
+  });
+ }
  const ordered = pinnedQuotaSegments(segments, pins, false);
  if (!enabled) return preservePartitions ? ordered : ordered.length ? [{key:'all',connections:ordered.flatMap(segment=>segment.connections),boundaries:[]}] : [];
  const unavailable = new Set(segments.filter(segment=>['waiting','unavailable','disabled'].includes(segment.key)).flatMap(segment=>segment.connections.map(c=>c.id)));

@@ -50,3 +50,14 @@ test('sequence groups retain boundaries inside availability groups and when avai
  assert.deepEqual(flat.map(g=>g.key),['regular.1','regular.2']);
  assert.deepEqual(flat[0].connections,[a,b]);
 });
+
+
+test('reset groups precede availability and contain all matching waiting and disabled accounts',()=>{
+ const a={id:'match-wait'},b={id:'match-ready'},c={id:'outside-ready'},d={id:'no-reset-ready'},e={id:'match-off',isActive:false};
+ const segments=[{key:'reset.1',resetGroup:'reset',connections:[a,b],unavailableIds:['match-wait']},{key:'reset.2',resetGroup:'reset',connections:[e]},{key:'reset-other',resetGroup:'reset-other',connections:[c]},{key:'regular',resetGroup:'regular',connections:[d]}];
+ const groups=availabilityQuotaSegments(segments,['no-reset-ready'],{},true,true,true);
+ assert.deepEqual(groups.map(g=>[g.rotationName,g.connections.map(c=>c.id)]),[['Reset · Matches · Ready',['match-ready']],['Reset · Matches · Unavailable',['match-wait','match-off']],['Reset · Outside criteria · Ready',['outside-ready']],['No reset credits · Ready',['no-reset-ready']]]);
+ const flat=availabilityQuotaSegments(segments,[],{},false,true,true);
+ assert.equal(flat.length,3);
+ assert.deepEqual(flat[0].connections.map(c=>c.id),['match-wait','match-ready','match-off']);
+});
