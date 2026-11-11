@@ -2,7 +2,7 @@ import { applicableRotationQuotas, evaluateRotation, resetCreditPriority } from 
 import {effectiveImageQuotaEligibility} from './imageQuotaEligibility.js';
 import { isModelLockActive } from 'open-sse/services/accountFallback.js';
 import { getAntigravityQuotaBlockForConnection, getAntigravityQuotaCache } from './antigravityQuota.js';
-import { textModelPermissionReason, isConfiguredTextModel } from '../../shared/utils/textModelPermission.mjs';
+import { textModelPermissionReason, isConfiguredTextModel, accountModelAccess } from '../../shared/utils/textModelPermission.mjs';
 
 export function rotationPool(connections, snapshots, policy, { provider, model = '', lockModel = model, now = Date.now(), onStep, imageStates, quotaAdmission = false, textPolicies, resetHolds = [] }) {
   // Resettable exhausted accounts enter selection only after the ordinary pool is empty.
@@ -18,14 +18,13 @@ export function rotationPool(connections, snapshots, policy, { provider, model =
   ] : null;
   for (const connection of connections) {
     let reason = null, gate = 'account';
-    const enabled = connection.providerSpecificData?.enabledModels;
     const textReason = !quotaAdmission && isConfiguredTextModel(provider, model) !== false
-      ? textModelPermissionReason(connection, model, textPolicies?.get(connection.id)) : null;
+      ? textModelPermissionReason(connection, model, textPolicies?.get(connection.id), snapshots[connection.id]?.modelAccess, now) : null;
     if (connection.isActive === false) reason = 'Turned off';
     else if (resetHolds.some(row => row.connectionId === connection.id)) reason = 'Reset pending verification';
     else if (!quotaAdmission && isModelLockActive(connection, lockModel) && !(Number(connection.errorCode) === 429 && policy.resetPriority?.autoReset && resetCreditPriority(connection, snapshots[connection.id], policy, { provider, model, now }))) reason = 'Cooling down';
     else if (textReason) reason = textReason;
-    else if (provider === 'codex' && Array.isArray(enabled) && enabled.length && model && !enabled.includes(model.replace(/^[^/]+\//, ''))) reason = 'Model disabled';
+    else if (accountModelAccess(connection,model,snapshots[connection.id]?.modelAccess,now).reason) reason=accountModelAccess(connection,model,snapshots[connection.id]?.modelAccess,now).reason;
     if (!reason && quotaAdmission) {
       admission[0].ready++;
       gate = 'subscription';
@@ -47,7 +46,7 @@ export function rotationPool(connections, snapshots, policy, { provider, model =
     } else if (!reason) {
       if (provider === 'antigravity' && model && getAntigravityQuotaBlockForConnection(connection.id, model, getAntigravityQuotaCache())) reason = 'Quota wait';
       else if (imageStates && !effectiveImageQuotaEligibility(connection,imageStates.get(connection.id),{model,nowMs:now}).eligible) reason = 'Image hold or quota wait';
-      else if (!(policy.resetPriority?.autoReset && resetCreditPriority(connection, snapshots[connection.id], policy, { provider, model, now })) && policy.enabled && applicableRotationQuotas(snapshots[connection.id], provider, model, now).some(quota => quota.window !== 'session' && quota.remaining === 0)) reason = 'Quota exhausted';
+      else if (!(policy.resetPriority?.autoReset && resetCreditPriority(connection, snapshots[connection.id], policy, { provider, model, now })) && applicableRotationQuotas(snapshots[connection.id], provider, model, now).some(quota => (quota.window !== 'session' || !policy.enabled) && quota.remaining === 0)) reason = 'Quota exhausted';
     }
     if (reason) blocked.push({ connection, reason, ...(quotaAdmission ? { gate } : {}) }); else eligible.push(connection);
   }

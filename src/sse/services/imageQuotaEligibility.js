@@ -1,3 +1,4 @@
+import {accountModelAccess} from '../../shared/utils/textModelPermission.mjs';
 function nextBlockedAt(rows) {
   if (!rows?.length || rows.some((row) => !row.retryAt || !Number.isFinite(Date.parse(row.retryAt)))) return null;
   return rows.map((row) => row.retryAt).sort((a, b) => Date.parse(a) - Date.parse(b)).at(-1) || null;
@@ -18,10 +19,7 @@ export function effectiveImageQuotaEligibility(connection, state = {}, {
     return { eligible: false, state: "account_disabled", retryAt: null, confidence: "unknown" };
   }
 
-  const enabledModels = connection.providerSpecificData?.enabledModels;
-  if (connection.provider === "codex" && Array.isArray(enabledModels) && enabledModels.length && model && !enabledModels.includes(model)) {
-    return { eligible: false, state: "model_not_enabled", retryAt: null, confidence: "unknown" };
-  }
+  if (accountModelAccess(connection,model,state.modelAccess,nowMs).reason) return {eligible:false,state:'model_not_enabled',retryAt:null,confidence:'unknown'};
 
   if (state.manualPolicy?.policyState === "paused" || state.manualPolicy) {
     return {

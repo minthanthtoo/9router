@@ -1,3 +1,4 @@
+import {accountModelAccess} from '@/shared/utils/textModelPermission.mjs';
 import { getSettings, getProviderConnectionById, updateProviderConnection } from '@/lib/localDb';
 import { readRotationSnapshots, readCreditResetHolds, completeCreditResetRecovery } from '@/lib/db/repos/providerRotationRepo.js';
 import { rotationPool } from '../../sse/services/providerRotation.js';
@@ -40,7 +41,7 @@ export async function prepareAutomaticCreditReset(connections, policy, model, { 
   const exhaustedIds = () => connections.filter(c => applicableRotationQuotas(snapshots[c.id], 'codex', model).some(q => q.remaining === 0)).map(c => c.id);
   // Use ordinary eligible accounts first, including unknown capacity; a reset is a last resort.
   if (ordinaryReady()) return { blocked: [...new Set([...held, ...exhaustedIds()])] };
-  const matches = connections.filter(c => !held.has(c.id) && c.isActive !== false && resetCreditPriority(c, snapshots[c.id], policy, { provider: 'codex', model, now }))
+  const matches = connections.filter(c => !held.has(c.id) && c.isActive !== false && !accountModelAccess(c,model,snapshots[c.id]?.modelAccess).reason && resetCreditPriority(c, snapshots[c.id], policy, { provider: 'codex', model, now }))
     .sort((a, b) => snapshots[a.id].credits.expiresAt - snapshots[b.id].credits.expiresAt);
   const blocked = [...held];
   for (const connection of matches) {
@@ -60,7 +61,7 @@ export async function prepareAutomaticCreditReset(connections, policy, model, { 
       if (ordinaryReady()) return { blocked: [...new Set([...held, ...exhaustedIds()])] };
       quotas = applicableRotationQuotas(snapshot, 'codex', model, Date.now());
       if (!quotas.length || !quotas.some(q => q.remaining === 0)) return { blocked };
-      if (!resetCreditPriority(refreshed, snapshot, policy, { provider: 'codex', model })) { blocked.push(connection.id); continue; }
+      if (accountModelAccess(refreshed,model,snapshot?.modelAccess).reason || !resetCreditPriority(refreshed, snapshot, policy, { provider: 'codex', model })) { blocked.push(connection.id); continue; }
     } catch { blocked.push(connection.id); continue; }
     const latest = await getProviderConnectionById(connection.id);
     const current = (await getSettings()).providerStrategies?.codex?.rotationSequence;

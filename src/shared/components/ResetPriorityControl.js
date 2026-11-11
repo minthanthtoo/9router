@@ -58,9 +58,9 @@ export default function ResetPriorityControl({ value, onChange, disabled = false
             <div className="flex items-center gap-2 text-sm font-medium text-text-main">
               <span aria-hidden="true" className="material-symbols-outlined text-amber-500">restart_alt</span>
               Codex user allowance
-              <ImageHelp label="Credit priority"><p>Uses the latest saved Codex allowance read. Accounts form three groups in order: reset credits matching both conditions, other usable reset credits, and no usable reset credits. Availability groups stay inside each reset group. Later quota sorts order accounts within these groups. Missing or expired credit observations count as no usable reset credits until refreshed. Automatic reset spends one available credit only when no ordinarily eligible account remains and the selected account has an exhausted applicable allowance. Requests wait for confirmed quota recovery. Unknown reset results are held for review.</p></ImageHelp>
+              <ImageHelp label="Credit priority"><p>Uses the latest saved Codex allowance read. Sorts credits matching both conditions first, then other usable credits, then accounts without usable credits; earliest expiry first. This creates no groups. With explicit quota divisions, credit priority orders accounts inside each resulting group. Missing or expired credit observations count as no usable reset credits until refreshed. Automatic reset spends one available credit only when no ordinarily eligible account remains and the selected account has an exhausted applicable allowance. Requests wait for confirmed quota recovery. Unknown reset results are held for review.</p></ImageHelp>
             </div>
-            <p className="mt-2 text-xs text-text-muted">Matching resets → Other resets → No resets</p>
+            <p className="mt-2 text-xs text-text-muted">Matching credits first · earliest expiry</p>
           </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" role="switch" checked={value.enabled} disabled={disabled} onChange={event => onChange({ ...value, enabled: event.target.checked })} />

@@ -1,6 +1,6 @@
 import { readTextModelPolicies } from '@/lib/db/repos/textModelPolicyRepo.js';
 import { rotationPool } from "@/sse/services/providerRotation.js";
-import { emptyRotation, validateRotation, evaluateRotation, applicableRotationQuotas, scopeMatches, RESET_GROUPS } from "@/shared/utils/rotationSequence.mjs";
+import { emptyRotation, validateRotation, evaluateRotation, applicableRotationQuotas, scopeMatches } from "@/shared/utils/rotationSequence.mjs";
 import { readRotationPolicy, readRotationSnapshots, readCreditResetHolds } from "@/lib/db/repos/providerRotationRepo.js";
 import { rotationPreviewInfo } from "@/shared/utils/rotationPreview.mjs";
 import { NextResponse } from "next/server";
@@ -103,6 +103,11 @@ export async function GET(request) {
       || (includeImageAccounts && ["antigravity", "codex", "gemini"].includes(connection.provider)));
     const providerOptions = Array.from(new Set(eligibleConnections.map((conn) => conn.provider))).sort();
 
+    const accessSnapshots=await readRotationSnapshots(eligibleConnections);
+    for(const connection of eligibleConnections) {
+      connection.modelAccess=accessSnapshots[connection.id]?.modelAccess || null;
+      connection.subscriptionPlan=accessSnapshots[connection.id]?.plan || null;
+    }
     const providerFilteredConnections = eligibleConnections.filter((conn) => (
       provider === "all" || conn.provider === provider
     ));
@@ -151,11 +156,10 @@ export async function GET(request) {
       sortedConnections = displayOrder.ranked.map(row=>row.connection);
       rotationSegments = displayOrder.segments.map(segment => ({
         key:segment.key,
-        resetGroup:segment.resetGroup,
         ids:segment.rows.map(row=>row.connection.id),
         boundaries:segment.boundaries,
         unavailableIds:segment.rows.filter(row=>unavailable.has(row.connection.id)||applicableRotationQuotas(snapshots[row.connection.id],provider,rotationModel).some(quota=>quota.remaining===0)).map(row=>row.connection.id),
-        rotationName:RESET_GROUPS.find(group=>group.key===segment.resetGroup)?.label||"Rotation segment",
+        rotationName:"Rotation segment",
       }));
     }
     if (searchParams.has("resetPriority") && !searchParams.has("rotationPolicy")) {

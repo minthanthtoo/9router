@@ -1,4 +1,4 @@
-import { partitionRotationRows, RESET_GROUPS } from "@/shared/utils/rotationSequence.mjs";
+import { partitionRotationRows, compareResetPriority } from "@/shared/utils/rotationSequence.mjs";
 import { getModelsByProviderId } from "open-sse/config/providerModels.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -188,12 +188,9 @@ export function segmentVisibleConnections(connections, quotaData, sorts = [], no
   const rules = sorts.map(sort => ({ ...QUOTA_SORT_OPTIONS.find(option => option.key === sort.key), direction: sort.direction, division: sort.division || "half" }))
     .filter(rule => rule.key && ["asc", "desc"].includes(rule.direction));
   const resetActive = connections.some(connection=>connection.rotationHint);
-  const resetGroups = RESET_GROUPS.map(({key,label})=>({
-    key,resetGroup:key,rotationName:label,
-    connections:connections.filter(connection=>(connection.rotationHint?.group || (connection.rotationHint?'reset':'regular'))===key),
-    boundaries:[],
-  })).filter(group=>group.connections.length);
-  if (!rules.length) return resetActive ? resetGroups : [{ key: 'all', connections: groupByProviderStable(connections) }];
+  const resetKey=connection=>({urgent:connection.rotationHint?.group==='reset',expiry:connection.rotationHint?.expiresAt || null});
+  const resetCompare=(a,b)=>resetActive ? compareResetPriority(resetKey(a.connection),resetKey(b.connection)) : 0;
+  if (!rules.length) return [{key:'all',connections:resetActive?[...connections].sort((a,b)=>compareResetPriority(resetKey(a),resetKey(b))):groupByProviderStable(connections),boundaries:[]}];
   const rows = connections.map(connection => ({
     connection,
     values: rules.map(rule => {
@@ -218,10 +215,11 @@ export function segmentVisibleConnections(connections, quotaData, sorts = [], no
       return describeQuotaDivision(ordered, depth, rules[depth].direction, rules[depth+1].division)
         .flatMap(({rows:part,detail},index) => descend(part,depth+1,[...path,index+1],[...boundaries,{...detail,key:rules[depth].key,label:rules[depth].label,kind:rules[depth].kind,direction:rules[depth].direction}]));
     }
+    if(resetActive) ordered.sort(resetCompare);
     return ordered.length ? [{ key: path.join(".") || "1", connections: ordered.map(row => row.connection), boundaries,
       ordering:{...rules[depth],mode:"half",startRank:1,endRank:ordered.length,parentCount:ordered.length,...quotaValueRange(ordered,depth)} }] : [];
   };
-  return resetActive ? resetGroups.flatMap(group=>descend(rows.filter(row=>group.connections.includes(row.connection)),0,[group.key],[]).map(segment=>({...segment,resetGroup:group.key,rotationName:group.rotationName}))) : descend(rows,0,[],[]);
+  return descend(rows,0,[],[]);
 }
 
 export function sortVisibleConnections(connections, quotaData, sorts = [], now = Date.now()) {

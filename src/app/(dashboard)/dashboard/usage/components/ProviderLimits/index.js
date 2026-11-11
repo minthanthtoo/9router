@@ -1095,7 +1095,7 @@ export default function ProviderLimits() {
       </QuotaControlDock>
       {resetListing && <p role="status" className="px-1 text-xs text-amber-600 dark:text-amber-400">
             Reset first · {resetSummary?.live ? 'Live rule' : 'Listing preview · Apply to routing'}
-            {' · '}{scopePending ? 'Checking…' : resetSummary?.applicable === false ? 'Main Codex text only' : resetSummary ? `${resetSummary.matching} matching · credit-expiry groups first` : 'Expiry not checked'}
+            {' · '}{scopePending ? 'Checking…' : resetSummary?.applicable === false ? 'Main Codex text only' : resetSummary ? `${resetSummary.matching} matching · ${quotaSorts.length>1 ? "credit priority within groups" : "credit expiry first"}` : 'Expiry not checked'}
             {!scopePending && resetSummary?.unavailable > 0 && ` · ${resetSummary.unavailable} missing expiry/quota reads`}
             {!scopePending && resetSummary?.matching === 0 && resetSummary?.nextExpiry && ` · Next credit expiry ${new Date(resetSummary.nextExpiry).toLocaleDateString(undefined,{month:'short',day:'numeric'})}`}
             {resetReadError && ` · ${resetReadError}`}
@@ -1193,6 +1193,7 @@ export default function ProviderLimits() {
                         {conn.rotationHint?.expiresAt && <span className="shrink-0 rounded bg-amber-500/10 px-1 text-[10px] text-amber-600 dark:text-amber-300" title={`Available reset credit expires ${new Date(conn.rotationHint.expiresAt).toLocaleString()}`}><span aria-hidden="true" className="material-symbols-outlined align-middle text-[12px]">restart_alt</span> {new Date(conn.rotationHint.expiresAt).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</span>}
                         {(collapsed || !summaryVisible) && quota?.quotas?.length > 0 && (isLoading || error) && <span role="status" aria-label={`${isLoading?'Refreshing quota':'Quota refresh unavailable'}${quota.cachedAt?` · last observed ${new Date(quota.cachedAt).toLocaleString()}`:''}`} title={`${isLoading?'Refreshing quota':'Quota refresh unavailable'}${quota.cachedAt?` · last observed ${new Date(quota.cachedAt).toLocaleString()}`:''}`} className={`material-symbols-outlined shrink-0 text-[14px] ${isLoading?'animate-spin text-text-muted':'text-amber-500'}`}>{isLoading?'progress_activity':'cloud_off'}</span>}
                       </h3>
+                      {(quota?.plan || conn.subscriptionPlan) && <span className="inline-flex rounded bg-surface-2 px-1.5 text-[10px] text-text-muted" title="Subscription plan · percentages are relative to this account allowance">{quota?.plan || conn.subscriptionPlan}</span>}
                       {getConnectionLabel(conn) ? (
                         <p className="text-xs text-text-muted truncate">
                           {getConnectionLabel(conn)}

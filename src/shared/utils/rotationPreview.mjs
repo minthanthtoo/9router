@@ -57,8 +57,8 @@ export function rotationStages(events, policy) {
   const pack = group => ({ key: group.path, ids: group.rows.map(row => row.connection.id), boundaries: group.boundaries || [], note: group.note || null, waiting: Boolean(group.waiting) });
   const stages = [{ id: 'eligible', type: 'eligible', label: 'Eligible', groups: [pack({ path: 'eligible', rows: initial.rows })] }];
   if (!policy.enabled) return stages;
-  let groups = initial.creditGroups?.length ? initial.creditGroups : [{path:'regular',rows:initial.rows,boundaries:[]}];
-  if (policy.resetPriority.enabled) stages.push({ id: 'credits', type: 'credits', label: '1 Reset groups', groups: groups.map(pack) });
+  let groups = [{path:'regular',rows:initial.resetOrdered || initial.rows,boundaries:[]}];
+  if (policy.resetPriority.enabled) stages.push({ id: 'credits', type: 'credits', label: '1 Reset priority', groups: groups.map(pack) });
   const waiting = [];
   const packed = () => [...groups.map(pack), ...waiting.map(pack)];
   const demote = () => {
@@ -85,8 +85,17 @@ export function rotationStages(events, policy) {
   }
   return stages;
 }
-export function rotationMeasurements(snapshot, provider, model, now) {
-  return Object.fromEntries(rotationMetrics(provider).map(metric => [metric.key, rotationValue(snapshot, metric, provider, model, now)]));
+export function rotationDisplayMetrics(snapshots,provider,model,now) {
+  const metrics=rotationMetrics(provider);
+  if(provider==='codex' && Object.values(snapshots).some(snapshot=>applicableRotationQuotas(snapshot,provider,model,now).some(quota=>quota.window==='monthly'))) {
+    const durations=[...new Set(Object.values(snapshots).flatMap(snapshot=>applicableRotationQuotas(snapshot,provider,model,now).filter(quota=>quota.window==='monthly').map(quota=>quota.windowSeconds)))];
+    const label=durations.length===1 && durations[0]>0 && durations[0]%86400===0 ? `${durations[0]/86400}d` : 'Plan period';
+    for(const kind of ['remaining','reset']) metrics.push({key:`monthly-${kind}`,window:'monthly',kind,label:`${label} ${kind==='remaining'?'left %':'reset'}`,icon:kind==='remaining'?'percent':'hourglass_empty'});
+  }
+  return metrics;
+}
+export function rotationMeasurements(snapshot, provider, model, now, metrics=rotationDisplayMetrics({snapshot},provider,model,now)) {
+  return Object.fromEntries(metrics.map(metric => [metric.key, rotationValue(snapshot, metric, provider, model, now)]));
 }
 export function quotaScopeSummary(snapshot, provider, model, now) {
   const scopes = [...new Set(applicableRotationQuotas(snapshot, provider, model, now).map(quota => quota.scope))];

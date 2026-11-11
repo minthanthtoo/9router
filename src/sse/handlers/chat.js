@@ -288,12 +288,14 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
   // Try with available accounts (fallback on errors)
   const excludeConnectionIds = new Set();
+  const rotationRequestState = {};
+  const rotationDeadline = Date.now()+300000;
   let lastError = null;
   let lastStatus = null;
   let lastHeaders = null;
 
-  while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { requestedModel: requestedModel || model, capability: "chat" });
+  while (excludeConnectionIds.size<100 && Date.now()<rotationDeadline) {
+    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { requestedModel: requestedModel || model, capability: "chat", requestState: rotationRequestState });
 
     // All accounts unavailable
     if (!credentials || credentials.allRateLimited) {
@@ -403,4 +405,5 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
     return result.response;
   }
+  return errorResponse(HTTP_STATUS.SERVICE_UNAVAILABLE, "Account retry budget exhausted. Please retry later.");
 }

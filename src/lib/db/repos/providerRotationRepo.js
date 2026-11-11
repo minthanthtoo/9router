@@ -47,6 +47,7 @@ export async function recordRotationUsage(connection, usage, readStartedAt = Dat
     if (old?.pendingReset && readStartedAt <= old.pendingResetUntil || old?.invalidatedAt >= readStartedAt) return;
     if ((old?.usageReadStartedAt ?? (old?.quotas?.length ? old.observedAt : 0)) > startedAt) return;
     const next = { ...normalizeRotationUsage(connection.provider, usage, startedAt), usageReadStartedAt: startedAt };
+    if (old?.plan === next.plan && old?.modelAccess) next.modelAccess=old.modelAccess;
     if ((old?.usageReadStartedAt !== undefined || old?.quotas?.length) && old.observedAt > next.observedAt) return;
     const creditReadAt = old?.creditReadStartedAt ?? old?.credits?.observedAt ?? 0;
     if (old?.credits && now - old.credits.observedAt <= SNAPSHOT_MAX_AGE_MS && (creditReadAt > startedAt || usage.resetCredits?.availableCount === old.credits.availableCount)) next.credits = old.credits;
@@ -55,6 +56,24 @@ export async function recordRotationUsage(connection, usage, readStartedAt = Dat
     db.run('INSERT INTO providerRotationSnapshots(connectionId,fingerprint,data) VALUES(?,?,?) ON CONFLICT(connectionId) DO UPDATE SET fingerprint=excluded.fingerprint,data=excluded.data', [connection.id, identity, JSON.stringify(next)]);
   });
 }
+// Only successful account-authenticated catalogs are evidence; a static fallback is not.
+export async function recordRotationModels(connection, models, readStartedAt = Date.now()) {
+  if(!Array.isArray(models) || models.length>4096 || !Number.isFinite(readStartedAt))return;
+  const ids=[...new Set(models.map(row=>typeof row==='string'?row:row?.id).filter(id=>typeof id==='string' && id.length>0 && id.length<=256))];
+  if(connection.provider!=='codex' || ids.length>4096)return;
+  const db=await getAdapter();
+  db.transaction(()=>{
+    if(!identityStillCurrent(db,connection))return;
+    const row=db.get('SELECT fingerprint,data FROM providerRotationSnapshots WHERE connectionId=?',[connection.id]);
+    if(row?.fingerprint!==fingerprint(connection))return;
+    const next=JSON.parse(row.data);
+    if(next.invalidatedAt || (next.modelAccess?.checkedAt||next.modelAccess?.observedAt||0)>readStartedAt || next.usageReadStartedAt>readStartedAt)return;
+    const checkedAt=Math.min(readStartedAt,Date.now());
+    next.modelAccess=ids.length ? {source:'account_models',observedAt:checkedAt,checkedAt,models:ids} : {...next.modelAccess,checkedAt};
+    db.run('UPDATE providerRotationSnapshots SET data=? WHERE connectionId=?',[JSON.stringify(next),connection.id]);
+  });
+}
+
 export async function recordRotationCredits(connection, details, readStartedAt = Date.now()) {
   const db = await getAdapter(), identity = fingerprint(connection), now = Date.now(), startedAt = Math.min(readStartedAt, now);
   db.transaction(() => {

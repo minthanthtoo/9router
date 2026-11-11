@@ -40,7 +40,7 @@ test('Codex priority requires known unexpired available credit and honors option
   a.credits = credit; b.credits = credit;
   const config = { ...emptyRotation(), enabled: true, resetPriority: { enabled: true, days: 3, weeklyBelow: 30 } };
   let result = evaluate(connections.slice(0, 2), { 0: a, 1: b }, config);
-  assert.deepEqual(result.candidates.map(row => row.id), ['0']);
+  assert.deepEqual(result.candidates.map(row => row.id), ['0','1']);
   result = evaluate(connections.slice(0, 2), { 0: a, 1: b }, { ...config, resetPriority: { ...config.resetPriority, weeklyBelow: null } });
   assert.equal(result.candidates.length, 2);
   for (const bad of [{ ...credit, availableCount: 0 }, { ...credit, expiresAt: now }, { ...credit, observedAt: now - SNAPSHOT_MAX_AGE_MS - 1 }, { ...credit, expiresAt: null }]) {
@@ -96,7 +96,7 @@ test('card sorting never lifts ordinary accounts above the reset-priority group'
   for(const sorts of [[],[{key:'weekly-remaining',direction:'desc',division:'half'}]]) {
     const groups=segmentVisibleConnections(accounts,quotas,sorts,now);
     assert.equal(groups[0].connections[0].id,'reset');
-    assert.equal(groups[0].rotationName,'Reset · Matches');
+    assert.equal(groups.length,1);
     assert.equal(groups.flatMap(group=>group.connections).length,2);
   }
 });
@@ -153,7 +153,7 @@ test('matching 0% accounts lead only with explicit automatic reset consent', () 
   data.empty.credits = {availableCount:1, observedAt:now, expiresAt:now+86400000};
   data.spent.credits = {availableCount:0, observedAt:now, expiresAt:now+3600000};
   const config = {...policy([{key:'weekly-remaining',direction:'desc'}]),resetPriority:{enabled:true,days:3,weeklyBelow:30,autoReset:true}};
-  assert.deepEqual(evaluate(rows,data,config).candidates.map(c=>c.id),['empty']);
+  assert.deepEqual(evaluate(rows,data,config).candidates.map(c=>c.id),['empty','ready']);
   assert.deepEqual(evaluate(rows,data,config).waiting.map(r=>r.connection.id),['spent']);
   config.resetPriority.autoReset=false;
   assert.deepEqual(evaluate(rows,data,config).candidates.map(c=>c.id),['ready']);
@@ -173,12 +173,13 @@ test('availability grouping defaults on at two sorts, supports opt-out and reset
 });
 
 
-test('reset criteria create exactly three roots and later sorts stay inside each root',()=>{
+test('reset criteria order credits without creating segments',()=>{
  const data=Object.fromEntries(connections.map((c,i)=>[c.id,{...snapshot([90,10,80,20,70,30,60,40][i]),credits:i<6?{availableCount:1,observedAt:now,expiresAt:now+(i<4?1:5)*86400000}:null}]));
  data['3'].quotas.find(q=>q.window==='session').remaining=0;
  const config={...policy([{key:'weekly-remaining',direction:'asc',division:'half'}]),resetPriority:{enabled:true,days:3,weeklyBelow:50}};
  const result=evaluateRotation(connections,data,config,{provider:'codex',model:'gpt-6.1',now,includeExhausted:true});
- assert.deepEqual(result.segments.map(s=>[s.resetGroup,s.rows.map(r=>r.connection.id)]),[['reset',['1','3']],['reset-other',['5','4','2','0']],['regular',['7','6']]]);
+ assert.equal(result.segments.length,1);
+ assert.deepEqual(result.ranked.map(r=>r.connection.id),['1','3','2','0','5','4','7','6']);
  assert.ok(result.segments.every(s=>s.boundaries.length===0));
  const expired={...data['0'],credits:{...data['0'].credits,expiresAt:now-1}};
  assert.equal(evaluate(connections.slice(0,1),{'0':expired},config).ranked[0].resetGroup,'regular');

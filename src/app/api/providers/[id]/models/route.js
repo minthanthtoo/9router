@@ -1,3 +1,5 @@
+import {proxyAwareFetch} from 'open-sse/utils/proxyFetch.js';
+import { recordRotationModels } from '@/lib/db/repos/providerRotationRepo.js';
 import { NextResponse } from "next/server";
 import { getProviderConnectionById } from "@/models";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
@@ -207,15 +209,17 @@ const PROVIDER_MODELS_CONFIG = {
   codex: {
     customResolver: buildOAuthResolver({
       refreshFn: (conn) => refreshCodexToken(conn.refreshToken),
-      fetchFn: (token) => fetch(CODEX_MODELS_URL, {
+      fetchFn: async (token,connection) => proxyAwareFetch(CODEX_MODELS_URL, {
+        signal: AbortSignal.timeout(10000),
         method: "GET",
         headers: {
           "Content-Type": "application/json",
           "Accept": "application/json",
           "Authorization": `Bearer ${token}`,
-          "originator": "codex_cli_rs"
+          "originator": "codex_cli_rs",
+          ...(connection.providerSpecificData?.workspaceId || connection.providerSpecificData?.accountId || connection.providerSpecificData?.chatgptAccountId ? {"ChatGPT-Account-Id":connection.providerSpecificData.workspaceId || connection.providerSpecificData.accountId || connection.providerSpecificData.chatgptAccountId} : {}),
         }
-      }),
+      }, await resolveConnectionProxyConfig(connection.providerSpecificData || {})),
       parseFn: parseCodexModels,
       errorLabel: "Failed to fetch Codex models"
     })
@@ -637,9 +641,14 @@ export async function GET(request, { params }) {
 
     // Config-driven custom resolver path (OAuth refresh, non-OpenAI shape, etc.)
     if (typeof config.customResolver === "function") {
+      const readStartedAt=Date.now();
       const result = await config.customResolver(connection);
       if (result.error) {
         return NextResponse.json({ error: result.error }, { status: result.status || 500 });
+      }
+      if(connection.provider==="codex") {
+        try { await recordRotationModels(connection,result.warning?[]:result.models,readStartedAt); }
+        catch { console.warn("Account model catalog could not be saved"); }
       }
       return NextResponse.json({
         provider: connection.provider,

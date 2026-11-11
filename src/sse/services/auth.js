@@ -1,4 +1,4 @@
-import { legacyRotationNext, applicableRotationQuotas } from "@/shared/utils/rotationSequence.mjs";
+import { legacyRotationNext, applicableRotationQuotas, emptyRotation } from "@/shared/utils/rotationSequence.mjs";
 import { readRotationSnapshots, chooseSequenceConnection } from "@/lib/db/repos/providerRotationRepo.js";
 import { rotationPool } from "./providerRotation.js";
 import {resolveImageRouting,resolveImageAccountPreference,resolveImageSelection} from "@/shared/utils/imageRouting.mjs";
@@ -28,7 +28,7 @@ import { effectiveImageQuotaEligibility } from "./imageQuotaEligibility.js";
 import * as log from "../utils/logger.js";
 import { normalizeGeminiProjectId } from "@/lib/geminiProjectId";
 import { readTextModelPolicies } from '@/lib/db/repos/textModelPolicyRepo.js';
-import { textModelPermissionReason } from '@/shared/utils/textModelPermission.mjs';
+import { textModelPermissionReason, accountModelAccess } from '@/shared/utils/textModelPermission.mjs';
 
 // Mutex to prevent race conditions during account selection
 let selectionMutex = Promise.resolve();
@@ -282,11 +282,14 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       ? allConnections.filter((connection) => Boolean(geminiQuotaProjectId(connection)))
       : allConnections;
     const textPolicies = options?.capability === 'chat' ? await readTextModelPolicies(connections) : null;
+    const admissionSnapshots = options?.capability==='chat' || quotaAwareImage ? await readRotationSnapshots(connections) : {};
+    const requestState = options?.requestState || {};
+    if(options?.capability==='chat' && !requestState.textRotationPolicy) requestState.textRotationPolicy=structuredClone((await getSettings()).providerStrategies?.[providerId]?.rotationSequence || emptyRotation());
     const automaticResetBlocked = new Set();
     let automaticResetReady = null;
     if (providerId === 'codex' && options?.capability === 'chat' && !options?.peekOnly) {
-      const policy = (await getSettings()).providerStrategies?.codex?.rotationSequence;
-      const candidates = connections.filter(c => !excludeSet.has(c.id) && (!isModelLockActive(c, model) || Number(c.errorCode) === 429) && !textModelPermissionReason(c, model, textPolicies?.get(c.id)));
+      const policy = requestState.textRotationPolicy;
+      const candidates = connections.filter(c => !excludeSet.has(c.id) && (!isModelLockActive(c, model) || Number(c.errorCode) === 429) && !textModelPermissionReason(c, requestedModel, textPolicies?.get(c.id), admissionSnapshots[c.id]?.modelAccess));
       const { prepareAutomaticCreditReset } = await import('@/shared/services/automaticCreditReset.js');
       const prepared = await prepareAutomaticCreditReset(candidates, policy, options.requestedModel || model);
       prepared.blocked.forEach(id => automaticResetBlocked.add(id));
@@ -317,11 +320,9 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     const quotaStates = quotaAwareImage
       ? await getImageQuotaState(connections, providerId, "image_generation", model)
       : null;
-    const admissionSnapshots = quotaAwareImage ? await readRotationSnapshots(connections) : {};
     const subscriptionBlocked = connection => applicableRotationQuotas(admissionSnapshots[connection.id],providerId,options.requestedModel||model).some(quota=>quota.remaining===0);
     const isAntigravity = providerId === "antigravity";
     const antigravityQuotaCache = isAntigravity && model ? getAntigravityQuotaCache() : null;
-    const requestState = options?.requestState || {};
     const quotaRequestId = options?.quotaRequestId || null;
     let probeCandidate = null;
     let probeLeaseExpiresAt = null;
@@ -340,8 +341,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       }
     }
     const codexModelEnabled = (connection) => {
-      const enabled = connection.providerSpecificData?.enabledModels;
-      return providerId !== "codex" || !Array.isArray(enabled) || !enabled.length || !requestedModel || enabled.includes(requestedModel);
+      return !accountModelAccess(connection,requestedModel,admissionSnapshots[connection.id]?.modelAccess).reason;
     };
 
     if (quotaAwareImage && !options?.peekOnly && !requestState?.recoveryProbeClaimed && quotaRequestId) {
@@ -384,7 +384,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     let availableConnections = connections.filter(c => {
       if (automaticResetBlocked.has(c.id)) return false;
       if (excludeSet.has(c.id)) return false;
-      if (textPolicies && textModelPermissionReason(c, requestedModel, textPolicies.get(c.id))) return false;
+      if (textPolicies && textModelPermissionReason(c, requestedModel, textPolicies.get(c.id), admissionSnapshots[c.id]?.modelAccess)) return false;
       if (isModelLockActive(c, model)) return false;
       if (quotaAwareImage) {
         if (subscriptionBlocked(c)) return false;
@@ -397,8 +397,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         if (!eligibility.eligible) return false;
         if (eligibility.state === "probe_eligible" && !options?.peekOnly && c.id !== probeCandidate?.id) return false;
       }
-      const enabled = c.providerSpecificData?.enabledModels;
-      if (providerId === "codex" && Array.isArray(enabled) && enabled.length && requestedModel && !enabled.includes(requestedModel)) return false;
+      if (accountModelAccess(c,requestedModel,admissionSnapshots[c.id]?.modelAccess).reason) return false;
       // Antigravity: skip if live quota exhausted for this model
       if (!quotaAwareImage && isAntigravity && model && antigravityQuotaCache) {
         const resetAt = antigravityQuotaResetAt(c, model, antigravityQuotaCache);
@@ -502,7 +501,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     const imageSelection = resolveImageSelection(imageRule,providerOverride,settings);
     const strategy = imageSelection.strategy;
 
-    const accountSequence = options?.imageOperation ? resolveImageAccountPreference(imageRule, providerOverride.rotationSequence, providerId) : providerOverride.rotationSequence;
+    const accountSequence = options?.imageOperation ? resolveImageAccountPreference(imageRule, providerOverride.rotationSequence, providerId) : requestState.textRotationPolicy || providerOverride.rotationSequence || emptyRotation();
     let connection;
     if (probeCandidate && availableConnections.includes(probeCandidate)) {
       connection = probeCandidate;
@@ -515,10 +514,10 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         log.info("AUTH", `${provider} | pinned to ${connection.id?.slice(0, 8)} (${connection.name || connection.email || "unnamed"})`);
       }
     }
-    if ((!connection || connection !== probeCandidate) && (options?.capability === "chat" || options?.imageOperation) && (accountSequence?.enabled || options?.imageOperation)) {
+    if ((!connection || connection !== probeCandidate) && (options?.capability === "chat" || options?.imageOperation) && (accountSequence || options?.imageOperation)) {
       try {
         const snapshots = quotaAwareImage ? admissionSnapshots : await readRotationSnapshots(availableConnections);
-        const quotaModel = options.requestedModel || model;
+        const quotaModel = requestedModel;
         const pool = rotationPool(availableConnections, snapshots, accountSequence, { quotaAdmission: Boolean(options?.imageOperation), provider: providerId, model: quotaModel, lockModel: model, textPolicies });
         if (connection && !pool.ranked.some(row => row.connection.id === connection.id)) connection = null;
         // Account ranking precedes model-specific image rotation, without bypassing admission gates.

@@ -10,7 +10,7 @@ export const RESET_GROUPS = [
   {key:'regular',label:'No reset credits'},
 ];
 const WINDOWS = {
-  codex: ['session', 'weekly'], claude: ['session', 'weekly'], antigravity: ['session', 'weekly', 'model'],
+  codex: ['session', 'weekly', 'monthly'], claude: ['session', 'weekly'], antigravity: ['session', 'weekly', 'model'],
   'gemini-cli': ['model'], minimax: ['session', 'weekly'], 'minimax-cn': ['session', 'weekly'],
   'minimax-code': ['session', 'weekly'], 'minimax-code-global': ['session', 'weekly'],
   glm: ['session', 'weekly'], 'glm-cn': ['session', 'weekly'], kimi: ['weekly', 'rolling'],
@@ -21,7 +21,7 @@ const WINDOWS = {
 };
 const LABELS = { session: 'Short window', weekly: 'Weekly', monthly: 'Monthly', daily: 'Daily', cycle: 'Plan period', rolling: 'Rolling', model: 'Model quota' };
 export function rotationMetrics(provider) {
-  return (WINDOWS[provider] || []).flatMap(window => ['remaining', 'reset'].map(kind => ({
+  return (WINDOWS[provider] || []).filter(window=>provider!=='codex'||window!=='monthly').flatMap(window => ['remaining', 'reset'].map(kind => ({
     key: `${window}-${kind}`, window, kind, label: `${LABELS[window]} ${kind === 'remaining' ? 'left %' : 'reset'}`,
     icon: kind === 'remaining' ? 'percent' : 'hourglass_empty',
   }))).filter(metric => !(provider === 'ollama' && metric.kind === 'reset'));
@@ -85,12 +85,13 @@ export function normalizeRotationUsage(provider, usage, observedAt = Date.now(),
       if(image){
         if(quota.windowSeconds===604800) window='weekly';
         else if(quota.windowSeconds>0&&quota.windowSeconds<=86400) window='session';
+        else if(quota.windowSeconds>86400) window='monthly';
         else continue;
         scope='codex:image';
       } else {
       if (!/^(?:(?:spark|review)_)?(?:session|weekly)$/.test(id)) continue;
       window = id.endsWith('weekly') ? 'weekly' : 'session';
-      if (quota.windowSeconds > 0) { if (quota.windowSeconds === 604800) window = 'weekly'; else if (quota.windowSeconds <= 86400) window = 'session'; else continue; }
+      if (quota.windowSeconds > 0) { if (quota.windowSeconds === 604800) window = 'weekly'; else if (quota.windowSeconds <= 86400) window = 'session'; else window = 'monthly'; }
       scope = id.startsWith('spark_') ? 'codex:spark' : id.startsWith('review_') ? 'codex:review' : 'codex:main';
       }
     } else if (provider === 'antigravity') {
@@ -113,13 +114,13 @@ export function normalizeRotationUsage(provider, usage, observedAt = Date.now(),
     let remaining = percentage !== null ? percentage : total > 0 && left !== null ? left / total * 100 : total > 0 && used !== null ? (total - used) / total * 100 : null;
     if (remaining !== null && (remaining < 0 || remaining > 100)) remaining = null;
     const resetAt = provider === 'ollama' || /bonus|trial/i.test(id) ? null : timestamp(quota.resetAt);
-    quotas.push({ id, window, scope, remaining, resetAt, windowSeconds: number(quota.windowSeconds) });
+    quotas.push({ id, window, scope, remaining, resetAt, windowSeconds: number(quota.windowSeconds), source: 'provider_usage', unit: provider === 'codex' ? 'relative_percent' : 'relative_headroom' });
   }
   const credits = creditDetails && Array.isArray(creditDetails.credits) ? {
     availableCount: number(creditDetails.availableCount),
     expiresAt: creditDetails.credits.filter(credit => credit.status === 'available').map(credit => timestamp(credit.expiresAt)).filter(time => time !== null && time > observedAt).sort((a, b) => a - b)[0] ?? null,
   } : null;
-  return { provider, observedAt: timestamp(usage?.observedAt) ?? observedAt, quotas, credits };
+  return { provider, observedAt: timestamp(usage?.observedAt) ?? observedAt, plan: typeof usage?.plan === 'string' ? usage.plan.slice(0,80) : null, quotas, credits };
 }
 export function scopeMatches(provider, scope, model) {
   const lower = canonicalTextModel(provider, model).toLowerCase();
@@ -152,6 +153,11 @@ export function resetCreditPriority(connection, snapshot, policy, { provider, mo
   return Boolean(fresh && credits?.availableCount > 0 && Number.isFinite(credits.observedAt) && now >= credits.observedAt && now - credits.observedAt <= SNAPSHOT_MAX_AGE_MS && credits.expiresAt > now && credits.expiresAt <= now + policy.resetPriority.days * 86400000 && (policy.resetPriority.weeklyBelow === null || weekly !== null && weekly <= policy.resetPriority.weeklyBelow));
 }
 
+export function compareResetPriority(a,b) {
+  const rank = row => row.urgent ? 0 : row.expiry ? 1 : 2;
+  return rank(a)-rank(b) || (a.expiry ?? Infinity)-(b.expiry ?? Infinity) || 0;
+}
+
 export function evaluateRotation(connections, snapshots, policy, { provider, model = '', now = Date.now(), onStep, includeExhausted = false }) {
   policy = validateRotation(policy, provider);
   const metrics = rotationMetrics(provider), rules = policy.sorts.map(sort => ({ ...metrics.find(metric => metric.key === sort.key), ...sort }));
@@ -166,13 +172,9 @@ export function evaluateRotation(connections, snapshots, policy, { provider, mod
   const segments = [], waiting = [];
   const urgent = rows.filter(row => row.urgent).sort((a,b)=>a.expiry-b.expiry);
   const regular = rows.filter(row => !row.urgent);
-  const creditGroups = RESET_GROUPS.map(({key,label})=>({
-    path:key,
-    note:label,
-    rows:rows.filter(row=>row.resetGroup===key).sort((a,b)=>(a.expiry??Infinity)-(b.expiry??Infinity)),
-    boundaries:[],
-  })).filter(group=>group.rows.length);
-  onStep?.({ initial: true, rows, urgent, regular, creditGroups });
+  const resetActive = policy.enabled && policy.resetPriority.enabled && provider==='codex' && scopeMatches(provider,'codex:main',model);
+  const resetOrdered = resetActive ? [...rows].sort(compareResetPriority) : rows;
+  onStep?.({ initial: true, rows, urgent, regular, resetOrdered });
   const descend = (group, depth, path, boundaries) => {
     const rule = rules[depth];
     const skipped = !rule || group.every(row => row.values[depth] === null);
@@ -182,17 +184,17 @@ export function evaluateRotation(connections, snapshots, policy, { provider, mod
     waiting.push(...waitingRows.map(row => ({ ...row, reason: 'Short window exhausted' })));
     const ready = waitingRows.length ? ordered.filter(row => !waitingRows.includes(row)) : ordered;
     const children = rule && !skipped && depth + 1 < rules.length && ready.length > 1 ? partitionRotationRows(ready, depth, rule.direction, rules[depth + 1].division).map(({ rows, detail }, index) => ({ rows, path: `${path}.${index + 1}`, boundaries: [...boundaries, { ...detail, label: rule.label, kind: rule.kind, key: rule.key, direction: rule.direction }] })) : null;
+    if(resetActive && !children && (!rule || depth+1===rules.length)) ready.sort(compareResetPriority);
     onStep?.({ depth, path, rows: ordered, ready, waiting: waitingRows, boundaries, children, skipped });
     if (children) children.forEach(child => descend(child.rows, depth + 1, child.path, child.boundaries));
     else if (rule && depth + 1 < rules.length) descend(ready, depth + 1, path, boundaries);
-    else if (ready.length) segments.push({ key: path, rows: ready, boundaries, resetGroup:ready[0].resetGroup });
+    else if (ready.length) segments.push({ key: path, rows: ready, boundaries });
   };
   if (!policy.enabled) { if (rows.length) segments.push({ key: 'regular', rows, boundaries: [] }); }
   else {
-    if (creditGroups.length) creditGroups.forEach(group=>descend(group.rows,0,group.path,group.boundaries));
-    else descend(rows, 0, 'regular', []);
+    descend(resetOrdered, 0, 'regular', []);
   }
-  const hasEvidence = rows.some(row => row.urgent || row.values.some(value => value !== null));
+  const hasEvidence = policy.enabled && rows.some(row => resetActive && row.expiry || row.values.some(value => value !== null));
   return { hasEvidence, segments, waiting, ranked: segments.flatMap(segment => segment.rows), candidates: segments[0]?.rows.map(row => row.connection) || [], staleCount: rows.filter(row => !row.fresh).length };
 }
 

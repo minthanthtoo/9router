@@ -1,3 +1,4 @@
+import {accountModelAccess} from '@/shared/utils/textModelPermission.mjs';
 import { getModelUpstreamId, PROVIDER_ID_TO_ALIAS } from "open-sse/config/providerModels.js";
 import {getImageQuotaState,getImageSupplierLoads} from '@/lib/db/repos/imageQuotaRepo.js';
 import {resolveImageRouting,resolveImageAccountPreference,resolveImageSelection,validateImageRouting} from '@/shared/utils/imageRouting.mjs';
@@ -5,7 +6,7 @@ import {selectImageRotation} from '@/lib/db/repos/imageRoutingRepo.js';
 import { getProviderConnections, getSettings } from '@/lib/localDb';
 import { readRotationPolicy, saveRotationPolicy, readRotationSnapshots, chooseSequenceConnection, readCreditResetHolds } from '@/lib/db/repos/providerRotationRepo.js';
 import { emptyRotation, rotationMetrics, validateRotation, legacyRotationNext, applicableRotationQuotas, scopeMatches } from '@/shared/utils/rotationSequence.mjs';
-import { rotationPreviewInfo, rotationStages, rotationMeasurements, quotaScopeSummary } from '@/shared/utils/rotationPreview.mjs';
+import { rotationPreviewInfo, rotationStages, rotationMeasurements, rotationDisplayMetrics, quotaScopeSummary } from '@/shared/utils/rotationPreview.mjs';
 import { rotationPool } from '@/sse/services/providerRotation.js';
 import { refreshRotationSnapshots, startRotationSnapshotRefresh } from '@/shared/services/rotationSnapshotRefresh.js';
 import { readTextModelPolicies } from '@/lib/db/repos/textModelPolicyRepo.js';
@@ -43,10 +44,11 @@ async function inspect(provider, policy, model, draftImageRule = null) {
     if(imageStates&&strategy==='round-robin'&&candidates.length>1){const loads=await getImageSupplierLoads(candidates,provider),minimum=Math.min(...candidates.map(row=>loads.get(row.id)||0));candidates=candidates.filter(row=>(loads.get(row.id)||0)===minimum);}
     next=strategy==='round-robin'?await selectImageRotation(candidates,{provider,model:lockModel,operation:imageRule?.operation||'generate',stickyRequests,peekOnly:true}):legacyRotationNext(candidates,strategy,stickyRequests);
   }
+  const metrics=rotationDisplayMetrics(snapshots,provider,model,now);
   const label = connection => connection.name || connection.displayName || connection.email || connection.id.slice(0, 8);
   return {
-    ...rotationPreviewInfo(pool, snapshots, policy, { provider, model, now }), stages: rotationStages(events, policy), model, sorts: policy.sorts, policyEnabled: policy.enabled, resetPriorityEnabled: policy.resetPriority.enabled, metrics: rotationMetrics(provider), observedAt: now, strategy, stickyRequests, total: connections.length, eligible: pool.ranked.length, staleCount: pool.staleCount, fallback: !policy.enabled || !pool.hasEvidence, nextId: next?.id || null,
-    rows: [...pool.segments, ...(pool.waiting.length ? [{ rows: pool.waiting, boundaries: [], waiting: true }] : [])].flatMap((segment, index) => segment.rows.map(row => ({ id: row.connection.id, name: label(row.connection), segment: index + 1, waiting: Boolean(segment.waiting), reason: row.reason || null, priority: row.urgent, resetRequired: Boolean(row.urgent && policy.resetPriority.autoReset && applicableRotationQuotas(snapshots[row.connection.id], provider, model, now).some(q => q.remaining === 0)), expiry: row.urgent ? row.expiry : null, constraints: applicableRotationQuotas(snapshots[row.connection.id], provider, model, now), measurements: rotationMeasurements(snapshots[row.connection.id], provider, model, now), scope: quotaScopeSummary(snapshots[row.connection.id], provider, model, now), values: row.values, fresh: row.fresh, observedAt: snapshots[row.connection.id]?.observedAt || null, boundaries: segment.boundaries }))),
+    ...rotationPreviewInfo(pool, snapshots, policy, { provider, model, now }), stages: rotationStages(events, policy), model, sorts: policy.sorts, policyEnabled: policy.enabled, resetPriorityEnabled: policy.resetPriority.enabled, metrics, observedAt: now, strategy, stickyRequests, total: connections.length, eligible: pool.ranked.length, staleCount: pool.staleCount, fallback: !policy.enabled || !pool.hasEvidence, nextId: next?.id || null,
+    rows: [...pool.segments, ...(pool.waiting.length ? [{ rows: pool.waiting, boundaries: [], waiting: true }] : [])].flatMap((segment, index) => segment.rows.map(row => ({ id: row.connection.id, name: label(row.connection), plan: snapshots[row.connection.id]?.plan || null, modelAccess: accountModelAccess(row.connection,model,snapshots[row.connection.id]?.modelAccess,now).state, segment: index + 1, waiting: Boolean(segment.waiting), reason: row.reason || null, priority: row.urgent, resetRequired: Boolean(row.urgent && policy.resetPriority.autoReset && applicableRotationQuotas(snapshots[row.connection.id], provider, model, now).some(q => q.remaining === 0)), expiry: row.urgent ? row.expiry : null, constraints: applicableRotationQuotas(snapshots[row.connection.id], provider, model, now), measurements: rotationMeasurements(snapshots[row.connection.id], provider, model, now, metrics), scope: quotaScopeSummary(snapshots[row.connection.id], provider, model, now), values: row.values, fresh: row.fresh, observedAt: snapshots[row.connection.id]?.observedAt || null, boundaries: segment.boundaries }))),
     admission: pool.admission || null,
     blocked: pool.blocked.map(row => ({ id: row.connection.id, name: label(row.connection), reason: row.reason, gate: row.gate || null })),
   };
@@ -61,7 +63,7 @@ export async function GET(request, { params }) {
     if(model.length>256||model&&!/^[A-Za-z0-9._:/-]+$/.test(model))throw new TypeError('Invalid model');
     const clean=canonicalTextModel(provider,model),image=configuredQuotaModels([provider],await getCustomModels()).some(item=>item.id===clean&&item.kind==='image');
     const effectivePolicy=image?resolveImageAccountPreference(resolveImageRouting(await getSettings(),provider,getModelUpstreamId(PROVIDER_ID_TO_ALIAS[provider]||provider,clean),'generate'),current.policy,provider):current.policy;
-    return reply({ ...current, effectivePolicy, sequenceScope:image?'image':'text', metrics: rotationMetrics(provider), preview: query.has('summary') ? null : await inspect(provider, current.policy, model) });
+    return reply({ ...current, effectivePolicy, sequenceScope:image?'image':'text', metrics:rotationMetrics(provider), preview: query.has('summary') ? null : await inspect(provider, current.policy, model) });
   } catch (error) { return failure(error); }
 }
 export async function POST(request, { params }) {

@@ -47,13 +47,13 @@ test('all waiting has no dispatch or legacy fallback candidates, even when sorts
   assert.equal(pool.ranked.length, 0); assert.equal(pool.candidates.length, 0); assert.equal(pool.waiting.length, 2);
   assert.equal(info.selectedCount, 0); assert.equal(pool.blocked.length, 0);
 });
-test('priority roots retain independent ready partitions and waiting rows go below both roots', () => {
+test('reset sorting adds no partitions beyond explicit quota divisions', () => {
   const s = Object.fromEntries(connections.map((c, i) => [c.id, snapshot(i === 0 ? 0 : 10 * i, 10 * (i + 1))]));
   for (const id of ['a', 'b', 'c']) s[id].credits = { observedAt: now, availableCount: 1, expiresAt: now + 86400000 };
   const { pool, stages } = run(s, { ...policy, resetPriority: { enabled: true, days: 3, weeklyBelow: null } });
-  assert.deepEqual(pool.segments.map(segment => segment.key), ['reset.1', 'reset.2', 'regular.1', 'regular.2']);
-  assert.deepEqual(ids(pool.ranked), ['b', 'c', 'd', 'e']); assert.deepEqual(ids(pool.waiting), ['a']);
-  assert.deepEqual(stages.at(-1).groups.flatMap(group => group.ids), ['b', 'c', 'd', 'e', 'a']);
+  assert.deepEqual(pool.segments.map(segment => segment.key), ['regular.1', 'regular.2']);
+  assert.deepEqual(ids(pool.ranked), ['c', 'b', 'e', 'd']); assert.deepEqual(ids(pool.waiting), ['a']);
+  assert.deepEqual(stages.at(-1).groups.flatMap(group => group.ids), ['c', 'b', 'e', 'd', 'a']);
 });
 test('fresh scoped zero only; stale, future, unknown, expired and unrelated observations remain unknown', () => {
   const cases = [undefined, snapshot(null), snapshot(0, 50, { observedAt: now - SNAPSHOT_MAX_AGE_MS - 1 }), snapshot(0, 50, { observedAt: now + 1 }), snapshot(0, 50, { provider: 'claude' }), { ...snapshot(0), quotas: [{ ...snapshot(0).quotas[0], resetAt: now }] }];
@@ -63,12 +63,12 @@ test('fresh scoped zero only; stale, future, unknown, expired and unrelated obse
   assert.equal(run({ a: ag }, policy, connections.slice(0, 1), { ...context, provider: 'antigravity', model: 'gemini-3-flash' }).pool.waiting.length, 1);
   assert.equal(run({ a: ag }, policy, connections.slice(0, 1), { ...context, provider: 'antigravity', model: 'claude-sonnet' }).pool.waiting.length, 0);
 });
-test('hard admission and separate holds win over short waiting; disabled policy keeps legacy behavior', () => {
+test('hard admission and separate holds win over short waiting; disabled policy still enforces known empty allowance', () => {
   const s = { a: snapshot(0, 0), b: snapshot(0), c: snapshot(0) };
   const rows = [connections[0], { ...connections[1], isActive: false }, { ...connections[2], 'modelLock_gpt-6.1': new Date(Date.now() + 60000).toISOString() }];
   const { pool } = run(s, policy, rows); assert.equal(pool.waiting.length, 0); assert.equal(pool.blocked.length, 3);
   const disabled = run({ a: snapshot(0) }, { ...policy, enabled: false }, connections.slice(0, 1));
-  assert.equal(disabled.pool.waiting.length, 0); assert.deepEqual(ids(disabled.pool.ranked), ['a']);
+  assert.equal(disabled.pool.waiting.length, 0); assert.deepEqual(ids(disabled.pool.ranked), []); assert.equal(disabled.pool.blocked[0].reason,'Quota exhausted');
   const allUnknown = evaluateRotation(connections, {}, policy, context); assert.equal(allUnknown.hasEvidence, false); assert.equal(allUnknown.candidates.length, connections.length);
 });
 

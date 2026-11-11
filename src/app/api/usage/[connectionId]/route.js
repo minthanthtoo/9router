@@ -3,7 +3,7 @@ import "open-sse/index.js";
 
 import { getProviderConnectionById, updateProviderConnection } from "@/lib/localDb";
 import { getUsageForProvider } from "open-sse/services/usage.js";
-import { recordRotationUsage } from "@/lib/db/repos/providerRotationRepo.js";
+import { recordRotationUsage, readRotationSnapshots } from "@/lib/db/repos/providerRotationRepo.js";
 import { imageUsageEvidence } from "open-sse/services/usage/imageEvidence.js";
 import { recordImageProviderUsageEvidence } from "@/lib/db/repos/connectionsRepo.js";
 import { isUnrecoverableRefreshError } from "open-sse/services/tokenRefresh.js";
@@ -206,6 +206,15 @@ export async function GET(request, { params }) {
     }
     try { await recordRotationUsage(connection, usage, rotationReadStartedAt); }
     catch { console.warn("[Usage] Rotation snapshot could not be saved"); }
+    if(connection.provider==='codex' && usage?.quotas) {
+      const snapshot=(await readRotationSnapshots([connection]))[connection.id];
+      if(!snapshot?.modelAccess || Date.now()-(snapshot.modelAccess.checkedAt || snapshot.modelAccess.observedAt || 0)>600000) {
+        try {
+          const {GET}=await import('@/app/api/providers/[id]/models/route.js');
+          await GET(new Request('http://localhost/internal-account-models'),{params:Promise.resolve({id:connection.id})});
+        } catch { console.warn('[Usage] Account model access remains unknown'); }
+      }
+    }
     return Response.json(usage);
   } catch (error) {
     const provider = connection?.provider ?? "unknown";

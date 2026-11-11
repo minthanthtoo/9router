@@ -129,7 +129,7 @@ test('API rejects unsupported controls and stale revision without provider calls
 test('global card preview sorts before pagination and puts expiring credits on page one', async () => {
   const clientRoute = await import(new URL('src/app/api/providers/client/route.js', root));
   await repo.recordRotationCredits(connections[3], { availableCount: 1, credits: [{ status: 'available', expiresAt: new Date(Date.now() + 86400000).toISOString() }] });
-  const withPriority = { ...config, resetPriority: { enabled: true, days: 3, weeklyBelow: null } };
+  const withPriority = { ...config, sorts:[], resetPriority: { enabled: true, days: 3, weeklyBelow: null } };
   const url = new URL('http://localhost/api/providers/client');
   url.searchParams.set('provider', 'codex'); url.searchParams.set('includeImageAccounts', 'true'); url.searchParams.set('pageSize', '2');
   url.searchParams.set('rotationModel', 'gpt-6.1'); url.searchParams.set('rotationPolicy', JSON.stringify(withPriority));
@@ -532,8 +532,8 @@ test('listing credit priority follows active controls even with live rotation di
   assert.equal(result.connections.filter(c=>c.rotationHint?.group==='reset').length,enabled?4:0);
   if(enabled){
    assert.deepEqual(new Set(result.connections.map(c=>c.id)),new Set(accounts.map(c=>c.id)));
-   assert.ok(result.rotationSegments.every(s=>s.resetGroup==='reset'));
-   assert.equal(result.rotationSegments[0].rotationName,'Reset · Matches');
+   assert.ok(result.rotationSegments.every(s=>s.resetGroup===undefined));
+   assert.equal(result.rotationSegments[0].rotationName,'Rotation segment');
   }
  }
 });
@@ -545,4 +545,50 @@ test('availability grouping without sorts still classifies disabled accounts',as
  url.searchParams.set('rotationPolicy',JSON.stringify({...engine.emptyRotation(),groupAvailability:true}));
  const result=await(await client.GET(new Request(url))).json();
  assert.ok(result.rotationSegments.flatMap(s=>s.unavailableIds).includes(connections[3].id));
+});
+
+test('account model evidence is durable, identity fenced and invalidated on subscription plan changes',async()=>{
+ const account=await createProviderConnection({provider:'codex',authType:'access_token',name:'mixed-plan fixture',accessToken:'synthetic-model-read',isActive:true});
+ await repo.recordRotationUsage(account,{...usage(100),plan:'free'});
+ await repo.recordRotationModels(account,[{id:'basic-model'}]);
+ let snapshot=(await repo.readRotationSnapshots([account]))[account.id];
+ assert.equal(snapshot.modelAccess.source,'account_models');
+ assert.deepEqual(snapshot.modelAccess.models,['basic-model']);
+ await repo.recordRotationModels(account,[]);
+ assert.deepEqual((await repo.readRotationSnapshots([account]))[account.id].modelAccess.models,['basic-model']);
+ await repo.recordRotationUsage(account,{...usage(90),plan:'free'});
+ assert.ok((await repo.readRotationSnapshots([account]))[account.id].modelAccess);
+ await repo.recordRotationUsage(account,{...usage(90),plan:'plus'});
+ assert.equal((await repo.readRotationSnapshots([account]))[account.id].modelAccess,undefined);
+ await updateProviderConnection(account.id,{accessToken:'synthetic-new-identity'});
+ await repo.recordRotationModels(account,[{id:'stale-model'}]);
+ assert.equal((await repo.readRotationSnapshots([await getProviderConnectionById(account.id)]))[account.id],undefined);
+ await updateProviderConnection(account.id,{isActive:false});
+});
+
+test('live text dispatch skips unsupported free plans, honors current empty quota and keeps per-request policy revision',async()=>{
+ const previous=await getSettings();
+ const free=await createProviderConnection({provider:'codex',authType:'access_token',name:'free rotation fixture',accessToken:'synthetic-free-access',isActive:true});
+ const paid=await createProviderConnection({provider:'codex',authType:'access_token',name:'paid rotation fixture',accessToken:'synthetic-paid-access',isActive:true});
+ const others=new Set(db.all('SELECT id FROM providerConnections').map(row=>row.id).filter(id=>id!==free.id&&id!==paid.id));
+ const options={capability:'chat',requestedModel:'premium-model',peekOnly:true,preferredConnectionId:free.id,requestState:{}};
+ try{
+  await updateSettings({providerStrategies:{codex:{rotationSequence:{...engine.emptyRotation(),enabled:true,sorts:[{key:'session-remaining',direction:'desc',division:'half'}]}}}});
+  await repo.recordRotationUsage(free,{plan:'free',quotas:{session:{total:100,used:0,windowSeconds:2592000,resetAt:new Date(Date.now()+2592000000).toISOString()}}});
+  await repo.recordRotationModels(free,[{id:'basic-model'}]);
+  await repo.recordRotationUsage(paid,{...usage(100),plan:'plus'});
+  await repo.recordRotationModels(paid,[{id:'premium-model'}]);
+  const first=await getProviderCredentials('codex',others,'premium-model',options);
+  assert.equal(first.connectionId,paid.id);
+  const revision=JSON.stringify(options.requestState.textRotationPolicy);
+  await updateSettings({providerStrategies:{codex:{rotationSequence:{...engine.emptyRotation()}}}});
+  await repo.recordRotationUsage(paid,{...usage(0),plan:'plus'});
+  const noCapacity=await getProviderCredentials('codex',others,'premium-model',options);
+  assert.equal(noCapacity,null);
+  assert.equal(JSON.stringify(options.requestState.textRotationPolicy),revision);
+  assert.equal(await getProviderCredentials('codex',new Set([...others,paid.id]),'premium-model',options),null);
+ }finally{
+  await updateProviderConnection(free.id,{isActive:false});await updateProviderConnection(paid.id,{isActive:false});
+  await updateSettings({providerStrategies:previous.providerStrategies});
+ }
 });
