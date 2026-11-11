@@ -1,3 +1,4 @@
+import { usageWorkload } from '../../../shared/utils/quotaCapacity.mjs';
 import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
@@ -286,7 +287,7 @@ export async function saveRequestUsage(entry) {
           entry.timestamp, entry.provider || null, entry.model || null,
           entry.connectionId || null, entry.apiKey || null, entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.status || "ok",
-          stringifyJson(tokens), stringifyJson({}),
+          stringifyJson(tokens), stringifyJson(usageWorkload(entry.workload?.startedAt, {service_tier:entry.workload?.speed,reasoning_effort:entry.workload?.effort})),
         ]
       );
 

@@ -1,4 +1,6 @@
 'use client';
+import CapacityEvidence from './CapacityEvidence.js';
+import {capacityComparable} from '../utils/quotaCapacity.mjs';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Button from './Button';
 import ProviderIcon from './ProviderIcon';
@@ -17,10 +19,10 @@ export function remainingTime(value, now) {
 }
 const pct = value => `${Math.round(value * 10) / 10}%`;
 function boundaryText(boundary, now) {
-  const value = v => boundary.kind === 'reset' ? remainingTime(v, now) : pct(v);
+  const value = v => boundary.kind === 'reset' ? remainingTime(v, now) : boundary.kind==='capacity'?`≈${v} requests`:pct(v);
   if (boundary.mode === 'half') return `Equal count · ranks ${boundary.startRank}–${boundary.endRank} of ${boundary.parentCount} by ${boundary.label}`;
   if (boundary.missing) return `${divisions[boundary.mode]} · ${boundary.missing} unreported values`;
-  const cut = boundary.mode === 'median' ? `threshold ${value(boundary.threshold)}` : boundary.gap ? `gap ${boundary.kind === 'reset' ? remainingTime(now + boundary.gap.size, now) : `${Math.round(boundary.gap.size * 10) / 10} percentage points`}` : 'no gap';
+  const cut = boundary.mode === 'median' ? `threshold ${value(boundary.threshold)}` : boundary.gap ? `gap ${boundary.kind === 'reset' ? remainingTime(now + boundary.gap.size, now) : `${Math.round(boundary.gap.size * 10) / 10} ${boundary.kind==='capacity'?'requests':'percentage points'}`}` : 'no gap';
   return `${divisions[boundary.mode]} · ${cut} · ${boundary.min === boundary.max ? `equal values ${value(boundary.min)}` : `${value(boundary.min)}–${value(boundary.max)}`}`;
 }
 function QuotaMeter({ value, label, missing }) {
@@ -33,12 +35,13 @@ export default function RotationPreviewExplorer({ preview, current, dirty, now, 
   const [stageId, setStageId] = useState('final'), [page, setPage] = useState(1), [selected, setSelected] = useState(null), [playing, setPlaying] = useState(false);
   const root = useRef(null), cards = useRef(new Map()), positions = useRef(null), lastContext = useRef('');
   const metrics = preview.metrics || [];
+  const capacitySkipped = preview.stages?.some(step=>step.rule?.key==='workload-capacity') && !capacityComparable(preview.rows.map(row=>row.capacityEstimate));
   const byId = useMemo(() => new Map(preview.rows.map(row => [row.id, row])), [preview]);
   const stages = useMemo(() => [...(preview.stages || []), { id: 'final', type: 'final', label: 'Final', groups: preview.groups.map(group => ({ key: `final-${group.segment}`, ids: preview.rows.filter(row => row.segment === group.segment).map(row => row.id), boundaries: group.boundaries, preferred: !group.waiting && !preview.fallback && group.segment === 1, waiting: group.waiting, priority: group.priority })) }], [preview]);
   const stage = stages.find(stage => stage.id === stageId) || stages.at(-1), stageIndex = stages.indexOf(stage);
   const ids = stage.groups.flatMap(group => group.ids), totalPages = Math.max(1, Math.ceil(ids.length / 10)), activePage = Math.min(page, totalPages);
   const pageIds = ids.slice((activePage - 1) * 10, activePage * 10), pageSet = new Set(pageIds);
-  const windows = [...new Set(metrics.map(metric => metric.window))];
+  const windows = [...new Set(metrics.filter(metric=>metric.kind!=='capacity').map(metric => metric.window))];
   const metricFor = (window, kind) => metrics.find(metric => metric.window === window && metric.kind === kind);
   const label = metric => rotationMetricLabel(metric, preview.sessionLabel);
   const activeKey = stage.type === 'sort' || stage.type === 'split' ? stage.rule.key : emphasizedKey;
@@ -81,7 +84,7 @@ export default function RotationPreviewExplorer({ preview, current, dirty, now, 
     <ol>{stages.slice(0, stage.type === 'final' ? -1 : stageIndex + 1).filter(step => step.type !== 'eligible').map(step => {
       const group = step.groups.find(group => group.ids.includes(row.id)); if (!group) return null;
       const metric = step.rule && metrics.find(metric => metric.key === step.rule.key), value = metric && row.measurements?.[metric.key];
-      return <li key={step.id}><strong>{stageLabel(step)}</strong><span>{group.waiting ? 'Short window exhausted · excluded from later sorts and dispatch' : step.type === 'sort' ? `${Number.isFinite(value) ? metric.kind === 'remaining' ? pct(value) : remainingTime(value, preview.observedAt) : missing(row)} · rank ${group.ids.indexOf(row.id) + 1} of ${group.ids.length} in this group` : step.type === 'credits' ? (group.note || RESET_GROUPS.find(root=>group.key===root.key)?.label || 'Reset classification unavailable') : group.boundaries.at(-1) ? boundaryText(group.boundaries.at(-1), preview.observedAt) : group.note || 'No split'}{group.note && step.type === 'sort' && ` · ${group.note}`}</span></li>;
+      return <li key={step.id}><strong>{stageLabel(step)}</strong><span>{group.waiting ? 'Short window exhausted · excluded from later sorts and dispatch' : step.type === 'sort' ? `${Number.isFinite(value) ? metric.kind === 'capacity' ? `≈${value} similar requests` : metric.kind === 'remaining' ? pct(value) : remainingTime(value, preview.observedAt) : missing(row)} · rank ${group.ids.indexOf(row.id) + 1} of ${group.ids.length} in this group` : step.type === 'credits' ? (group.note || RESET_GROUPS.find(root=>group.key===root.key)?.label || 'Reset classification unavailable') : group.boundaries.at(-1) ? boundaryText(group.boundaries.at(-1), preview.observedAt) : group.note || 'No split'}{group.note && step.type === 'sort' && ` · ${group.note}`}</span></li>;
     })}</ol>
     <p>{row.waiting ? `${row.reason} · not dispatchable.` : preview.fallback ? 'Existing account selection is used.' : stage.type !== 'final' ? 'This is an intermediate step. Final shows the selected group.' : row.segment === 1 ? `Selected group · ${preview.strategy === 'round-robin' ? `round robin switches after ${preview.stickyRequests} request${preview.stickyRequests === 1 ? '' : 's'}` : 'first eligible account selection'}` : 'Lower priority; eligibility or ranking must change before this group supplies requests.'}</p>
     <time dateTime={row.observedAt ? new Date(row.observedAt).toISOString() : undefined}>{row.observedAt ? `Observed ${exact(row.observedAt)}${!row.fresh ? ' · Old observation' : ''}` : 'No observation'}</time>
@@ -98,6 +101,7 @@ export default function RotationPreviewExplorer({ preview, current, dirty, now, 
     <div className={styles.toolbar}><span className={styles.scope}>{scopes.length === 1 ? scopes[0] : scopes.length ? 'Account-specific allowance scopes · see Why here' : 'Quota scope not reported'}</span><span className={styles.badge}>{preview.strategy==='round-robin'?`Round robin · ${preview.stickyRequests} request${preview.stickyRequests===1?'':'s'}/account`:'Fill first'}{!preview.fallback?' · preferred group':''}</span></div>
     <div className={styles.outcome}>{preview.waitingCount>0&&<span>Waiting: {preview.waitingCount}</span>}<strong>{preview.eligible} ready</strong><span aria-hidden="true">→</span><strong>{preview.selectedCount} {preview.fallback?'in rotation':'preferred'}</strong><span aria-hidden="true">→</span><span>{current ? `Next${dirty?' if applied':''}: ${byId.get(preview.nextId)?.name || 'None eligible'}` : 'Next: updating'}</span></div>
     <div className="flex items-center gap-2 text-xs text-text-muted"><span>{preview.fallback?'Existing rotation':stage.type==='final'?`${preview.groups.filter(group=>!group.waiting).length} ready groups`:'Step preview'}</span><ImageHelp label="Selection mechanism"><p>{stage.type === 'final' ? preview.fallback ? 'Existing rotation applies. Editing rules does not enable the sequence.' : `Requests use the preferred group · ${preview.strategy==='round-robin'?`switch after ${preview.stickyRequests} requests`:'first eligible account'}. Lower groups supply requests after higher groups are excluded, blocked or reranked.` : stage.type==='sort'?'Accounts reorder inside their current groups, preserving earlier splits.':stage.type==='split'?'Divide each preceding group before the next sort.':'Select Final for the selected group.'}</p></ImageHelp></div>
+    {capacitySkipped && <span className={styles.missing}>Capacity sort skipped · comparable history needed</span>}
     <div className={styles.quality}>{preview.quality.missing>0&&<span>{preview.quality.missing} no observation</span>}{preview.quality.old>0&&<span>{preview.quality.old} old observations</span>}{preview.quality.unreported>0&&<span>{preview.quality.unreported} quota not reported</span>}{!current&&<span>Previous preview · not valid for Apply</span>}</div>
     {stages.some(step=>['sort','split','waiting','credits'].includes(step.type))&&<div className={styles.walkthrough} role="group" aria-label="Order walkthrough">
       <Button size="sm" variant="ghost" disabled={stageIndex===0} onClick={()=>chooseStage(stages[stageIndex-1].id)}>Previous step</Button>
@@ -113,7 +117,7 @@ export default function RotationPreviewExplorer({ preview, current, dirty, now, 
         {row.priority&&<time className={styles.credit} dateTime={new Date(row.expiry).toISOString()} title={exact(row.expiry)}>Credit expires in {remainingTime(row.expiry,now)}</time>}
         <div className={styles.windows}>{windows.map(window=>{const metric=metricFor(window,'remaining'),resetMetric=metricFor(window,'reset');return <div key={window} className={styles.window}><div className={activeKey===metric?.key?styles.activeMetric:''}><span>{label(metric)}</span><QuotaMeter value={row.measurements?.[metric.key]} label={label(metric)} missing={missing(row)} /></div>{resetMetric&&<div className={activeKey===resetMetric.key?styles.activeMetric:''}><ResetValue value={row.measurements?.[resetMetric.key]} now={now} missing={missing(row)} /></div>}</div>;})}</div>
         <div className={styles.evidence}><span>{row.waiting ? row.reason || 'Short window exhausted' : !row.observedAt ? 'No observation' : !row.fresh ? 'Old observation' : 'Saved observation'}</span>{row.observedAt&&<time dateTime={new Date(row.observedAt).toISOString()} title={exact(row.observedAt)}>{new Date(row.observedAt).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}</time>}</div>
-        {why(row)}
+        <CapacityEvidence estimate={row.capacityEstimate}/>{why(row)}
       </article>})];
     })}</div>
     {!ids.length&&<p>No eligible accounts for this model.</p>}

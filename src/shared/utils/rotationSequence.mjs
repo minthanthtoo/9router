@@ -1,3 +1,4 @@
+import { estimateCapacity, capacityComparable } from './quotaCapacity.mjs';
 import { CODEX_REVIEW_SUFFIX } from "../../../open-sse/providers/models/helpers.js";
 import { canonicalTextModel } from './textModelPermission.mjs';
 // Shared by the account inspector and request routing; never performs provider actions.
@@ -24,7 +25,7 @@ export function rotationMetrics(provider) {
   return (WINDOWS[provider] || []).filter(window=>provider!=='codex'||window!=='monthly').flatMap(window => ['remaining', 'reset'].map(kind => ({
     key: `${window}-${kind}`, window, kind, label: `${LABELS[window]} ${kind === 'remaining' ? 'left %' : 'reset'}`,
     icon: kind === 'remaining' ? 'percent' : 'hourglass_empty',
-  }))).filter(metric => !(provider === 'ollama' && metric.kind === 'reset'));
+  }))).filter(metric => !(provider === 'ollama' && metric.kind === 'reset')).concat(WINDOWS[provider] ? [{key:'workload-capacity',window:'workload',kind:'capacity',label:'Observed capacity',icon:'science',asc:'Lowest first',desc:'Highest first'}] : []);
 }
 export function emptyRotation() { return { version: ROTATION_VERSION, enabled: false, sorts: [], resetPriority: { enabled: false, days: 3, weeklyBelow: null } }; }
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -114,7 +115,7 @@ export function normalizeRotationUsage(provider, usage, observedAt = Date.now(),
     let remaining = percentage !== null ? percentage : total > 0 && left !== null ? left / total * 100 : total > 0 && used !== null ? (total - used) / total * 100 : null;
     if (remaining !== null && (remaining < 0 || remaining > 100)) remaining = null;
     const resetAt = provider === 'ollama' || /bonus|trial/i.test(id) ? null : timestamp(quota.resetAt);
-    quotas.push({ id, window, scope, remaining, resetAt, windowSeconds: number(quota.windowSeconds), source: 'provider_usage', unit: provider === 'codex' ? 'relative_percent' : 'relative_headroom' });
+    quotas.push({ id, window, scope, remaining, resetAt, windowSeconds: number(quota.windowSeconds), source: 'provider_usage', scopeSource:'provider_adapter', windowSource:number(quota.windowSeconds)>0?'provider_duration':'provider_adapter', unit: provider === 'codex' ? 'relative_percent' : 'relative_headroom' });
   }
   const credits = creditDetails && Array.isArray(creditDetails.credits) ? {
     availableCount: number(creditDetails.availableCount),
@@ -142,6 +143,7 @@ export function applicableRotationQuotas(snapshot, provider, model, now = Date.n
   return snapshot.quotas.filter(quota => scopeMatches(provider, quota.scope, model) && (quota.resetAt === null || quota.resetAt > now));
 }
 export function rotationValue(snapshot, metric, provider, model, now) {
+  if(metric.kind==='capacity'){const estimate=estimateCapacity(snapshot,canonicalTextModel(provider,model),now,applicableRotationQuotas(snapshot,provider,model,now));return estimate.state==='observed'?estimate.low:null;}
   const values = applicableRotationQuotas(snapshot, provider, model, now).filter(quota => quota.window === metric.window).map(quota => metric.kind === 'remaining' ? quota.remaining : quota.resetAt).filter(value => value !== null);
   return values.length ? Math.min(...values) : null;
 }
@@ -169,6 +171,8 @@ export function evaluateRotation(connections, snapshots, policy, { provider, mod
     const resetGroup = policy.enabled && policy.resetPriority.enabled && provider === 'codex' && scopeMatches(provider,'codex:main',model) ? urgent ? 'reset' : expiry ? 'reset-other' : 'regular' : null;
     return { connection, values: rules.map(rule => rotationValue(snapshot, rule, provider, model, now)), urgent, expiry, fresh, resetGroup };
   });
+  const capacityRules=rules.map((rule,index)=>rule.kind==='capacity'?index:-1).filter(index=>index>=0);
+  if(capacityRules.length && !capacityComparable(connections.map(connection=>estimateCapacity(snapshots[connection.id],canonicalTextModel(provider,model),now,applicableRotationQuotas(snapshots[connection.id],provider,model,now)))))for(const row of rows)for(const index of capacityRules)row.values[index]=null;
   const segments = [], waiting = [];
   const urgent = rows.filter(row => row.urgent).sort((a,b)=>a.expiry-b.expiry);
   const regular = rows.filter(row => !row.urgent);

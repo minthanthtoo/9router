@@ -100,3 +100,25 @@ Lead the PR with the operator problem and observable result, then include:
 Preparing a patch or PR draft does not authorize submission to the official repo.
 Do not submit, comment, alter an existing official PR or publish screenshots without
 the owner's instruction.
+
+## Relative quota and observed capacity
+
+Plan percentages describe headroom within that account's reported allowance. A
+Free monthly 100% and a Plus weekly 100% are not equal token budgets. Preserve
+reported plan, scope and duration; authentication claims are a separately labelled
+fallback. Never infer a fixed token limit or multiply by API prices.
+
+`quotaCapacity.mjs` learns passively from successful, provider-metered requests
+between two quota reads. It rejects plan/identity/reset changes, overlapping or
+mixed requests, incomplete/estimated usage, intervals over an hour and changes
+under five percentage points. Samples retain separate uncached input, cached
+input and output counts, with bounded seven-day retention in existing snapshots.
+No prompt, completion, credential or extra provider request is added.
+
+The optional Observed capacity sort uses a conservative similar-request range
+after five intervals, 25 quota points and ten requests per applicable allowance.
+Cross-account sorting requires matching requested speed/effort and request token
+components within 1.5x. Otherwise the rule is skipped; existing sorts/fallback
+remain. This range is an empirical extrapolation, not a confidence interval,
+token budget or guarantee. External use and hidden provider accounting remain
+unobserved. It cannot clear quota waits, grant model access or redeem resets.

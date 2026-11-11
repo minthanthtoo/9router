@@ -149,6 +149,28 @@
         "tests/rotation/ui.test.mjs",
         "tests/rotation/integration.test.mjs"
       ]
+    },
+    {
+      "id": "observed-workload-capacity",
+      "status": "committed-dependent-feature",
+      "depends_on": [
+        "account-rotation",
+        "quota-cards-and-controls"
+      ],
+      "entrypoints": [
+        "src/shared/utils/quotaCapacity.mjs",
+        "src/lib/db/repos/providerRotationRepo.js",
+        "src/lib/db/repos/usageRepo.js",
+        "open-sse/handlers/chatCore/requestDetail.js",
+        "open-sse/utils/stream.js",
+        "src/shared/components/CapacityEvidence.js"
+      ],
+      "tests": [
+        "tests/rotation/capacity.test.mjs",
+        "tests/rotation/integration.test.mjs",
+        "tests/unit/capacity-completion.test.js"
+      ],
+      "notes": "Passive empirical similar-request range; no fixed plan token budgets or additional provider calls. Known estimates require comparable requested settings and recorded request sizes. Admission, quota holds and reset consent remain authoritative."
     }
   ]
 }

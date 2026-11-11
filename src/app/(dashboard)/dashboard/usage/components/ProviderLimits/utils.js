@@ -1,3 +1,4 @@
+import { capacityComparable } from '@/shared/utils/quotaCapacity.mjs';
 import { partitionRotationRows, compareResetPriority } from "@/shared/utils/rotationSequence.mjs";
 import { getModelsByProviderId } from "open-sse/config/providerModels.js";
 
@@ -17,6 +18,7 @@ export const ACCOUNT_FILTER_OPTIONS = [
   { value: "inactive", label: "Turned off" },
 ];
 export const QUOTA_SORT_OPTIONS = [
+  {key:"workload-capacity",label:"Observed capacity",icon:"science",window:"workload",kind:"capacity",asc:"Lowest first",desc:"Highest first"},
   { key: "session-reset", label: "Session reset", icon: "hourglass_empty", window: "session", kind: "reset", asc: "Earliest first", desc: "Latest first" },
   { key: "weekly-reset", label: "Weekly reset", icon: "hourglass_empty", window: "weekly", kind: "reset", asc: "Earliest first", desc: "Latest first" },
   { key: "session-remaining", label: "Session left %", icon: "percent", window: "session", kind: "remaining", asc: "Lowest first", desc: "Highest first" },
@@ -50,9 +52,11 @@ export function divideQuotaRows(ordered, valueIndex, direction, mode = "half") {
 
 export function formatQuotaSortValue(value, kind) {
   if (value === null || value === undefined) return "Unreported";
+  if(kind==="capacity")return `≈${Number(value.toFixed(1))} requests`;
   return kind === "reset" ? new Date(value).toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit",second:"2-digit"}) : `${Number(value.toFixed(2))}%`;
 }
 function formatQuotaGap(value, kind) {
+  if(kind==="capacity")return `${Number(value.toFixed(1))} requests`;
   if (kind !== "reset") return `${Number(value.toFixed(2))} pp`;
   const seconds=Math.round(value/1000),days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600),minutes=Math.floor(seconds%3600/60),rest=seconds%60;
   return [days&&`${days}d`,hours&&`${hours}h`,minutes&&`${minutes}m`,rest&&`${rest}s`].filter(Boolean).join(" ") || "<1s";
@@ -187,6 +191,7 @@ function groupByProviderStable(connections) {
 export function segmentVisibleConnections(connections, quotaData, sorts = [], now = Date.now()) {
   const rules = sorts.map(sort => ({ ...QUOTA_SORT_OPTIONS.find(option => option.key === sort.key), direction: sort.direction, division: sort.division || "half" }))
     .filter(rule => rule.key && ["asc", "desc"].includes(rule.direction));
+  const comparable=capacityComparable(connections.map(connection=>connection.capacityEstimate));
   const resetActive = connections.some(connection=>connection.rotationHint);
   const resetKey=connection=>({urgent:connection.rotationHint?.group==='reset',expiry:connection.rotationHint?.expiresAt || null});
   const resetCompare=(a,b)=>resetActive ? compareResetPriority(resetKey(a.connection),resetKey(b.connection)) : 0;
@@ -194,6 +199,7 @@ export function segmentVisibleConnections(connections, quotaData, sorts = [], no
   const rows = connections.map(connection => ({
     connection,
     values: rules.map(rule => {
+      if(rule.kind==="capacity")return comparable&&connection.capacityEstimate?.state==='observed'?connection.capacityEstimate.low:null;
       if (rule.kind === "remaining") return getConnectionQuotaRemaining(connection, quotaData, rule.window);
       const resets = (quotaData[connection.id]?.quotas || [])
         .filter(quota => matchesQuotaWindow(quota, rule.window) && quota.resetAt)
@@ -773,7 +779,7 @@ export function parseQuotaData(provider, data) {
               quotaType,
               windowSeconds: quota.windowSeconds,
               quotaStatus: quota.quotaStatus,
-              ...(quota.quotaKind === "image_generation" ? { displayUnit: "provider_percentage" } : {}),
+              displayUnit: "relative_percentage",
               used: quota.used || 0,
               total: quota.total || 0,
               remaining: quota.remaining,

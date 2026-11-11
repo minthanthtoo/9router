@@ -1,6 +1,7 @@
+import { accountContext, collectCapacitySamples } from '../../../shared/utils/quotaCapacity.mjs';
 import { createHash } from 'node:crypto';
 import { getAdapter } from '../driver.js';
-import { emptyRotation, normalizeRotationUsage, validateRotation, SNAPSHOT_MAX_AGE_MS } from '../../../shared/utils/rotationSequence.mjs';
+import { emptyRotation, normalizeRotationUsage, validateRotation, SNAPSHOT_MAX_AGE_MS, scopeMatches } from '../../../shared/utils/rotationSequence.mjs';
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const fingerprint = connection => hash([connection.provider, connection.accessToken, connection.apiKey, connection.projectId, connection.providerSpecificData?.accountId, connection.providerSpecificData?.workspaceId, connection.providerSpecificData?.chatgptAccountId, connection.providerSpecificData?.verifiedQuotaIdentity, connection.providerSpecificData?.imageQuotaIdentityGeneration]);
 function identityStillCurrent(db, connection) {
@@ -48,6 +49,15 @@ export async function recordRotationUsage(connection, usage, readStartedAt = Dat
     if ((old?.usageReadStartedAt ?? (old?.quotas?.length ? old.observedAt : 0)) > startedAt) return;
     const next = { ...normalizeRotationUsage(connection.provider, usage, startedAt), usageReadStartedAt: startedAt };
     if (old?.plan === next.plan && old?.modelAccess) next.modelAccess=old.modelAccess;
+    next.completedAt=now;
+    next.accountType=accountContext(connection,next);
+    if(old?.plan===next.plan && !old.invalidatedAt && !old.pendingReset) {
+      const rows=db.all('SELECT timestamp,model,status,tokens,meta FROM usageHistory WHERE connectionId=? AND provider=? AND timestamp>? AND timestamp<=? ORDER BY timestamp,id LIMIT 501',[connection.id,connection.provider,new Date(old.observedAt).toISOString(),new Date(startedAt).toISOString()]);
+      const pending=globalThis._pendingRequests?.byAccount?.[connection.id];
+      const nextSamples=pending&&Object.values(pending).some(n=>n>0)?[]:collectCapacitySamples(old,next,rows).filter(sample=>scopeMatches(connection.provider,sample.scope,sample.model));
+      next.capacitySamples=[...(old.capacitySamples||[]),...nextSamples].filter(sample=>sample.at<=now&&now-sample.at<=7*86400000).slice(-384);
+    }
+
     if ((old?.usageReadStartedAt !== undefined || old?.quotas?.length) && old.observedAt > next.observedAt) return;
     const creditReadAt = old?.creditReadStartedAt ?? old?.credits?.observedAt ?? 0;
     if (old?.credits && now - old.credits.observedAt <= SNAPSHOT_MAX_AGE_MS && (creditReadAt > startedAt || usage.resetCredits?.availableCount === old.credits.availableCount)) next.credits = old.credits;

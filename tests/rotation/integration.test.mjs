@@ -593,3 +593,24 @@ test('live text dispatch skips unsupported free plans, honors current empty quot
   await updateSettings({providerStrategies:previous.providerStrategies});
  }
 });
+
+test('passive capacity survives reads but not plan or identity changes and stores no request bodies',async()=>{
+ const original=Date.now;let tick=original()-120000;Date.now=()=>tick;
+ try {
+  const a=await createProviderConnection({provider:'codex',authType:'oauth',name:'Capacity fixture',accessToken:'capacity-synthetic',isActive:true});
+  const reset=new Date(tick+2592000000).toISOString();
+  const observation=left=>({plan:'free',quotas:{session:{used:100-left,total:100,windowSeconds:2592000,resetAt:reset}}});
+  await repo.recordRotationUsage(a,observation(100),tick);
+  for(let interval=0;interval<5;interval++){
+   for(let i=0;i<2;i++)db.run('INSERT INTO usageHistory(timestamp,provider,model,connectionId,status,tokens,meta) VALUES(?,?,?,?,?,?,?)',[new Date(tick+2000+i*1000).toISOString(),'codex','gpt-6-luna',a.id,'ok',JSON.stringify({prompt_tokens:1000,cached_tokens:500,completion_tokens:100}),JSON.stringify({startedAt:tick+1000+i*1000,speed:'standard',effort:'medium'})]);
+   tick+=10000;await repo.recordRotationUsage(a,observation(90-interval*10),tick);
+  }
+  let saved=(await repo.readRotationSnapshots([a]))[a.id];assert.equal(saved.capacitySamples.length,5);
+  const {estimateCapacity}=await import(new URL('src/shared/utils/quotaCapacity.mjs',root));
+  assert.equal(estimateCapacity(saved,'gpt-6-luna',tick).state,'observed');
+  assert.equal(saved.accountType.planSource,'provider_usage');
+  tick+=10000;await repo.recordRotationUsage(a,{...observation(50),plan:'plus'},tick);
+  saved=(await repo.readRotationSnapshots([a]))[a.id];assert.equal(saved.capacitySamples,undefined);
+  assert.equal((await repo.readRotationSnapshots([{...a,accessToken:'different'}]))[a.id],undefined);
+ }finally{Date.now=original;}
+});

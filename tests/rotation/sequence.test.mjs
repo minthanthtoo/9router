@@ -11,7 +11,7 @@ const evaluate = (rows, snapshots, config) => evaluateRotation(rows, snapshots, 
 test('capabilities and strict server validation reject unsupported/duplicate criteria and reset rules', () => {
   assert.deepEqual(rotationMetrics('deepseek'), []);
   assert.ok(rotationMetrics('ollama').every(metric => metric.kind !== 'reset'));
-  assert.ok(rotationMetrics('github').every(metric => metric.window === 'cycle'));
+  assert.ok(rotationMetrics('github').every(metric => metric.window === 'cycle'||metric.kind==='capacity'));
   assert.throws(() => validateRotation({ ...emptyRotation(), resetPriority: { enabled: true, days: 3, weeklyBelow: null } }, 'claude'));
   assert.throws(() => validateRotation(policy([{ key: 'monthly-reset' }]), 'codex'));
   assert.throws(() => validateRotation(policy([{ key: 'weekly-reset' }, { key: 'weekly-reset' }]), 'codex'));

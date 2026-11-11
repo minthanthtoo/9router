@@ -1,3 +1,4 @@
+import { accountContext, estimateCapacity } from '@/shared/utils/quotaCapacity.mjs';
 import { readTextModelPolicies } from '@/lib/db/repos/textModelPolicyRepo.js';
 import { rotationPool } from "@/sse/services/providerRotation.js";
 import { emptyRotation, validateRotation, evaluateRotation, applicableRotationQuotas, scopeMatches } from "@/shared/utils/rotationSequence.mjs";
@@ -20,7 +21,7 @@ const SAFE_FIELDS = [
   "priority", "globalPriority", "isActive", "defaultModel",
   "testStatus", "lastError", "lastErrorAt", "errorCode",
   "expiresAt", "lastUsedAt", "consecutiveUseCount",
-  "createdAt", "updatedAt",
+  "createdAt", "updatedAt", "accountContext", "capacityEstimate",
 ];
 
 const SAFE_PSD_FIELDS = [
@@ -107,6 +108,9 @@ export async function GET(request) {
     for(const connection of eligibleConnections) {
       connection.modelAccess=accessSnapshots[connection.id]?.modelAccess || null;
       connection.subscriptionPlan=accessSnapshots[connection.id]?.plan || null;
+      connection.accountContext=accountContext(connection,accessSnapshots[connection.id]);
+      const requested=searchParams.get("rotationModel")||searchParams.get("model")||"";
+      connection.capacityEstimate=estimateCapacity(accessSnapshots[connection.id],canonicalTextModel(connection.provider,requested),Date.now(),applicableRotationQuotas(accessSnapshots[connection.id],connection.provider,requested));
     }
     const providerFilteredConnections = eligibleConnections.filter((conn) => (
       provider === "all" || conn.provider === provider

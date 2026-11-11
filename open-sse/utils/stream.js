@@ -97,6 +97,10 @@ export function createSSEStream(options = {}) {
   let openAIResponsesDoneSent = false;
   let streamDoneSent = false;  // track duplicate [DONE] across transform + flush
   let finalized = false;
+  let reportedCompletion = false;
+  const observeCompletion = value => {
+    if(value?.type==='response.completed' && !value.response?.error || value?.choices?.some(choice=>choice.finish_reason) || value?.type==='message_stop' || value?.done===true && targetFormat===FORMATS.OLLAMA || value?.candidates?.some(candidate=>candidate.finishReason)) reportedCompletion=true;
+  };
   let completionFlushTimer = null;
 
   // Lane quirk: upstream streams thinking under the OpenRouter aliases
@@ -129,7 +133,8 @@ export function createSSEStream(options = {}) {
     if (onStreamComplete) {
       onStreamComplete({
         content: accumulatedContent,
-        thinking: accumulatedThinking
+        thinking: accumulatedThinking,
+        ...(reportedCompletion ? {reportedCompletion:true} : {})
       }, finalUsage, ttftAt);
     }
   };
@@ -182,6 +187,7 @@ export function createSSEStream(options = {}) {
           if (trimmed.startsWith("data:") && trimmed.slice(5).trim() !== "[DONE]") {
             try {
               let parsed = JSON.parse(trimmed.slice(5).trim());
+              observeCompletion(parsed);
 
               const idFixed = fixInvalidId(parsed);
 
@@ -318,6 +324,7 @@ export function createSSEStream(options = {}) {
         if (!trimmed) continue;
 
         const parsed = parseSSELine(trimmed, targetFormat);
+        observeCompletion(parsed);
         if (!parsed) continue;
 
         // Responses API same-format passthrough: preserve event framing + track terminal state
@@ -507,6 +514,7 @@ export function createSSEStream(options = {}) {
           // accepts "data: " lines, so an NDJSON provider (Ollama) lost whatever
           // arrived without its closing newline.
           const parsed = parseSSELine(buffer.trim(), targetFormat);
+          observeCompletion(parsed);
           // parseSSELine turns the SSE sentinel "data: [DONE]" into { done: true },
           // which must not be translated. An Ollama chunk also carries done:true,
           // but it is the real final chunk — it holds finish_reason and the token
