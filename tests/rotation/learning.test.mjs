@@ -33,7 +33,7 @@ test('display-only image estimate reports retained rolling usage and next expiry
  const point=(seconds,outcome)=>({dispatchedAt:new Date(start+seconds*1000).toISOString(),outcome});
  const events=[0,61,122,183].flatMap(offset=>[point(offset,'succeeded'),point(offset+1,'succeeded'),point(offset+2,'succeeded'),point(offset+3,'quota_rejected')]);
  const result=estimateImageQuotaLearning(events,{now:start+190000});
- assert.equal(result.estimate.state,'estimated');assert.equal(result.estimate.remainingPercentage,0);assert.equal(result.estimate.usedInWindow,3);assert.equal(result.estimate.resetAt,new Date(start+243000).toISOString());
+ assert.equal(result.estimate.state,'estimated');assert.equal(result.estimate.remainingPercentage,0);assert.equal(result.estimate.usedInWindow,3);assert.equal(result.estimate.windowRangeSeconds.max,61);assert.equal(result.estimate.resetAt,new Date(start+244000).toISOString());
  const later=estimateImageQuotaLearning(events,{now:start+250000});assert.equal(later.estimate.remainingPercentage,100);assert.equal(later.estimate.resetAt,null);
  const uncertain=estimateImageQuotaLearning([...events,point(189,'in_flight')],{now:start+190000});assert.equal(uncertain.estimate.remainingPercentage,undefined);
 });
