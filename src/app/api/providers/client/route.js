@@ -142,9 +142,11 @@ export async function GET(request) {
       const resetHolds = provider==='codex'&&!image&&scopeMatches(provider,'codex:main',rotationModel)?await readCreditResetHolds(sortedConnections):[];
       const evaluation = policy.enabled || rotationModel ? rotationPool(sortedConnections, snapshots, policy, {resetHolds,provider,model:rotationModel,lockModel,imageStates,quotaAdmission:image,textPolicies:image?null:await readTextModelPolicies(sortedConnections)}) : evaluateRotation(sortedConnections, snapshots, policy, {provider,model:rotationModel});
       resetPrioritySummary = rotationPreviewInfo(evaluation, snapshots, policy, {provider,model:rotationModel,now:Date.now()}).creditSummary;
-      rotationHints = Object.fromEntries(evaluation.ranked.filter(row => row.urgent).map(row => [row.connection.id,{expiresAt:row.expiry}]));
       // Card sorting includes every account. Request admission remains in rotationPool.
-      const displayOrder = evaluateRotation(sortedConnections, snapshots, policy, {provider,model:rotationModel,includeExhausted:true});
+      const displayPolicy = {...policy, enabled: policy.sorts.length > 0 || policy.resetPriority.enabled};
+      const displayOrder = evaluateRotation(sortedConnections, snapshots, displayPolicy, {provider,model:rotationModel,includeExhausted:true});
+      resetPrioritySummary = {...resetPrioritySummary, enabled: displayPolicy.resetPriority.enabled, matching: displayOrder.ranked.filter(row=>row.urgent).length};
+      rotationHints = Object.fromEntries(displayOrder.ranked.filter(row=>row.urgent).map(row=>[row.connection.id,{expiresAt:row.expiry}]));
       const unavailable = new Set([...evaluation.waiting, ...(evaluation.blocked || [])].map(row=>row.connection.id));
       sortedConnections = displayOrder.ranked.map(row=>row.connection);
       rotationSegments = displayOrder.segments.map(segment => ({
@@ -166,7 +168,9 @@ export async function GET(request) {
       const snapshots = await readRotationSnapshots(codex), now = Date.now();
       const evaluation = rotationPool(codex,snapshots,policy,{provider:'codex',model,now});
       resetPrioritySummary = rotationPreviewInfo(evaluation,snapshots,policy,{provider:'codex',model,now}).creditSummary;
-      const urgent = evaluation.ranked.filter(row => row.urgent);
+      const display = evaluateRotation(codex,snapshots,policy,{provider:'codex',model,now,includeExhausted:true});
+      const urgent = display.ranked.filter(row => row.urgent);
+      resetPrioritySummary = {...resetPrioritySummary,enabled:true,matching:urgent.length};
       rotationHints = Object.fromEntries(urgent.map(row => [row.connection.id,{expiresAt:row.expiry}]));
       // Promote across the entire result before pagination; local card sorts stay inside this group.
       sortedConnections = [...urgent.map(row => row.connection),...sortedConnections.filter(connection => !rotationHints[connection.id])];
@@ -174,7 +178,7 @@ export async function GET(request) {
     if (resetPrioritySummary) {
       const {policy:saved} = await readRotationPolicy('codex');
       const requested = searchParams.has('rotationPolicy') ? JSON.parse(searchParams.get('rotationPolicy')).resetPriority : JSON.parse(searchParams.get('resetPriority'));
-      resetPrioritySummary.live = saved.enabled && saved.resetPriority.enabled && saved.resetPriority.days === requested.days && saved.resetPriority.weeklyBelow === requested.weeklyBelow;
+      resetPrioritySummary.live = requested.enabled && saved.enabled && saved.resetPriority.enabled && saved.resetPriority.days === requested.days && saved.resetPriority.weeklyBelow === requested.weeklyBelow && Boolean(saved.resetPriority.autoReset) === Boolean(requested.autoReset);
     }
     const total = sortedConnections.length;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));

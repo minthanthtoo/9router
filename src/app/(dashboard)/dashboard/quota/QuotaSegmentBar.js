@@ -4,13 +4,12 @@ import { quotaSegmentDescription } from "../usage/components/ProviderLimits/util
 
 export default function QuotaSegmentBar({ segment, index, total, previous, next, covered = false, headingId, onNavigate, compact=false }) {
  const details=quotaSegmentDescription(segment),[current,setCurrent]=useState(0),[paused,setPaused]=useState(false),[hover,setHover]=useState(false);
- useEffect(()=>{setCurrent(0);},[segment.key]);
  useEffect(()=>{
   if(!compact||details.length<2||paused||hover||window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
   const timer=setInterval(()=>{if(!document.hidden)setCurrent(value=>(value+1)%details.length);},3500);
   return()=>clearInterval(timer);
  },[compact,details.length,paused,hover]);
- const name=['ready','unavailable'].includes(segment.key)?segment.rotationName:segment.key==='disabled'?'Disabled accounts':segment.key==='pinned'?'Pinned':segment.rotationName ? `${segment.rotationName} ${index+1}` : `Segment ${segment.key}`;
+ const name=(segment.availability||['ready','unavailable'].includes(segment.key))?segment.rotationName:segment.key==='disabled'?'Disabled accounts':segment.key==='pinned'?'Pinned':segment.rotationName ? `${segment.rotationName} ${index+1}` : `Segment ${segment.key}`;
  return <div className={`quota-segment-bar col-span-full min-w-0 ${compact?'is-compact':''} ${covered?'invisible':''}`} inert={covered} aria-hidden={covered || undefined} onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)} onFocus={()=>setHover(true)} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setHover(false);}}>
   <div className="quota-segment-heading flex min-w-0 items-center gap-2">
    <span aria-hidden="true" className="material-symbols-outlined shrink-0 text-primary" style={{fontSize:18}}>{segment.key==='pinned'?'push_pin':'account_tree'}</span>

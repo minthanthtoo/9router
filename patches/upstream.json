@@ -62,12 +62,19 @@
       ],
       "entrypoints": [
         "src/app/(dashboard)/dashboard/quota/ImageCardModelGroup.js",
-        "src/shared/components/RotationPreviewExplorer.js"
+        "src/shared/components/RotationPreviewExplorer.js",
+        "src/app/(dashboard)/dashboard/quota/quotaPins.mjs",
+        "src/app/(dashboard)/dashboard/quota/QuotaSegmentBar.js",
+        "src/app/(dashboard)/dashboard/usage/components/ProviderLimits/index.js",
+        "src/app/api/providers/client/route.js",
+        "src/shared/components/ResetPriorityControl.js"
       ],
       "tests": [
         "tests/rotation/card-models.test.mjs",
         "tests/rotation/ui.test.mjs",
-        "tests/rotation/image-controls-ui.test.mjs"
+        "tests/rotation/image-controls-ui.test.mjs",
+        "tests/rotation/card-segments.test.mjs",
+        "tests/rotation/integration.test.mjs"
       ]
     },
     {

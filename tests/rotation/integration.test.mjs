@@ -501,7 +501,7 @@ test('quota card weekly reset sort orders every account before availability grou
  }
  const client=await import(new URL('src/app/api/providers/client/route.js',root));
  for(const direction of ['asc','desc']){
-  const policy={...config,sorts:[{key:'weekly-reset',direction,division:'half'}],resetPriority:{enabled:false,days:3,weeklyBelow:null}};
+  const policy={...config,enabled:false,sorts:[{key:'weekly-reset',direction,division:'half'}],resetPriority:{enabled:false,days:3,weeklyBelow:null}};
   const url=new URL('http://localhost/api/providers/client');
   for(const [key,value] of Object.entries({provider:'codex',includeImageAccounts:'true',rotationModel:'gpt-6.1',rotationPolicy:JSON.stringify(policy),pageSize:'2'}))url.searchParams.set(key,value);
   const result=await(await client.GET(new Request(url))).json();
@@ -510,5 +510,29 @@ test('quota card weekly reset sort orders every account before availability grou
   url.searchParams.set('page','2');
   const second=await(await client.GET(new Request(url))).json();
   assert.deepEqual(second.connections.map(c=>c.id),expected.slice(2).map(i=>active[i].id));
+ }
+});
+
+
+test('listing credit priority follows active controls even with live rotation disabled',async()=>{
+ const accounts=await Promise.all(connections.map(c=>getProviderConnectionById(c.id)));
+ const now=Date.now();
+ for(let i=0;i<accounts.length;i++){
+  db.run('DELETE FROM providerRotationSnapshots WHERE connectionId=?',[accounts[i].id]);
+  await repo.recordRotationUsage(accounts[i],{quotas:{session:{total:100,used:100,resetAt:new Date(now+3600000).toISOString()},weekly:{total:100,used:90,resetAt:new Date(now+86400000).toISOString()}}},Date.now());
+  await repo.recordRotationCredits(accounts[i],{availableCount:1,credits:[{status:'available',expiresAt:new Date(now+(4-i)*3600000).toISOString()}]});
+ }
+ const client=await import(new URL('src/app/api/providers/client/route.js',root));
+ const url=new URL('http://localhost/api/providers/client?provider=codex&includeImageAccounts=true&rotationModel=gpt-6.1&pageSize=100');
+ for(const enabled of [true,false]){
+  const policy={...config,enabled:false,resetPriority:{enabled,days:3,weeklyBelow:30,autoReset:true}};
+  url.searchParams.set('rotationPolicy',JSON.stringify(policy));
+  const result=await(await client.GET(new Request(url))).json();
+  assert.equal(result.resetPrioritySummary.enabled,enabled);
+  assert.equal(result.connections.filter(c=>c.rotationHint).length,enabled?4:0);
+  if(enabled){
+   assert.deepEqual(result.connections.map(c=>c.id),accounts.toReversed().map(c=>c.id));
+   assert.equal(result.rotationSegments[0].rotationName,'Expiring credit');
+  }
  }
 });

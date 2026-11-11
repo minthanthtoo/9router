@@ -38,3 +38,15 @@ test('ungrouped cards preserve reset order across ready, waiting and disabled ac
  assert.deepEqual(availabilityQuotaSegments(sections,[],{},false,true)[0].connections.map(c=>c.id),['early','waiting','ready']);
  assert.deepEqual(availabilityQuotaSegments(sections,[],{},true,true).map(g=>g.connections.map(c=>c.id)),[['ready'],['early','waiting']]);
 });
+
+
+test('sequence groups retain boundaries inside availability groups and when availability is off',()=>{
+ const a={id:'a'}, b={id:'b'}, c={id:'c'}, d={id:'d'};
+ const segments=[{key:'regular.1',connections:[a,b],boundaries:[{mode:'gap',threshold:10}],unavailableIds:['b']},{key:'regular.2',connections:[c,d],boundaries:[{mode:'gap',threshold:20}],unavailableIds:['d']}];
+ const groups=availabilityQuotaSegments(segments,[],{},true,true,true);
+ assert.deepEqual(groups.map(g=>[g.rotationName,g.connections.map(c=>c.id)]),[['Ready · Group 1',['a']],['Ready · Group 2',['c']],['Unavailable · Group 1',['b']],['Unavailable · Group 2',['d']]]);
+ assert.equal(groups[1].boundaries[0].threshold,20);
+ const flat=availabilityQuotaSegments(segments,[],{},false,true,true);
+ assert.deepEqual(flat.map(g=>g.key),['regular.1','regular.2']);
+ assert.deepEqual(flat[0].connections,[a,b]);
+});

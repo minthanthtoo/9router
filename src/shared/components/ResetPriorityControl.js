@@ -41,8 +41,9 @@ export default function ResetPriorityControl({ value, onChange, disabled = false
       disabled={disabled}
       aria-haspopup="dialog"
       aria-expanded={open}
+      aria-pressed={value.enabled}
       aria-label={`Codex credit priority: ${value.enabled ? `on, expires within ${value.days} days` : 'off'}`}
-      title="Codex user-allowance credits · before quota sorts"
+      title={value.enabled ? `Credit priority on · earliest credit expiry first · within ${value.days} days` : "Credit priority off · configure expiring reset credits"}
       onClick={() => setOpen(true)}
       className={`inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border px-2 text-sm transition-colors ${value.enabled ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-text-muted hover:bg-surface-2'}`}
     >

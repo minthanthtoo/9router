@@ -392,7 +392,7 @@ export default function ProviderLimits() {
         return [];
       }
     },
-    [accountFilter, page, pageSize, providerFilter, imageModel, imageModelProvider, imageModelCategory, connectionScope],
+    [accountFilter, page, pageSize, providerFilter, imageModel, imageModelProvider, imageModelCategory, connectionScope, resetListing, resetPriority, rotationPreview?.model, rotationPreview?.policy, rotationScope],
   );
 
   // Fetch quota for a specific connection
@@ -852,13 +852,13 @@ export default function ProviderLimits() {
   }, [autoRefresh, refreshAll, hasHydratedAutoRefresh]);
 
   const connectionSegments = useMemo(
-    () => availabilityQuotaSegments(scopePending ? [] : rotationScope && serverRotationSegments ? serverRotationSegments.map(segment => ({...segment, connections: segment.ids.map(id => connections.find(connection => connection.id === id)).filter(Boolean)})).filter(segment => segment.connections.length) : segmentVisibleConnections(connections, quotaData, quotaSorts),pinnedCards,quotaData,availabilityGrouping({sorts:quotaSorts,groupAvailability}),Boolean(rotationScope&&serverRotationSegments)),
-    [connections, quotaData, quotaSorts, scopePending,pinnedCards, rotationScope, serverRotationSegments,groupAvailability],
+    () => availabilityQuotaSegments(scopePending ? [] : rotationScope && serverRotationSegments ? serverRotationSegments.map(segment => ({...segment, connections: segment.ids.map(id => connections.find(connection => connection.id === id)).filter(Boolean)})).filter(segment => segment.connections.length) : segmentVisibleConnections(connections, quotaData, quotaSorts),pinnedCards,quotaData,availabilityGrouping({sorts:quotaSorts,groupAvailability}),Boolean(rotationScope&&serverRotationSegments),quotaSorts.length>1||resetListing),
+    [connections, quotaData, quotaSorts, scopePending,pinnedCards, rotationScope, serverRotationSegments,groupAvailability,resetListing],
   );
   const sortedConnections = connectionSegments.flatMap(segment => segment.connections);
   const segmentCount = connectionSegments.filter(segment=>segment.connections.length).length;
   const allCardsCollapsed = sortedConnections.length > 0 && sortedConnections.every(connection=>!cardGroupVisible(quotaVisibility,connection.id,"images",legacyCardCollapse)&&!cardGroupVisible(quotaVisibility,connection.id,"text",legacyCardCollapse));
-  const showSegmentBars=availabilityGrouping({sorts:quotaSorts,groupAvailability});
+  const showSegmentBars=quotaSorts.length>1||resetListing;
   const visibleSegments = scopePending ? [] : connectionSegments.filter(segment=>segment.connections.length);
   const scrollOwner = () => {
     let owner=quotaRoot.current?.parentElement;
@@ -1087,7 +1087,7 @@ export default function ProviderLimits() {
         </div>
         <p id="quota-sort-hint" className="text-xs text-text-muted">
 
-          {rotationScope ? `${showSegmentBars?segmentCount+" availability groups":"Sorted accounts"} · all filtered accounts` : quotaSorts.length ? `${showSegmentBars?segmentCount+" availability groups":"Sorted accounts"} · this page` : "Sort: off → ↑ → ↓ → off · this page"}
+          {rotationScope ? `${showSegmentBars?segmentCount+" groups":"Sorted accounts"} · all filtered accounts` : quotaSorts.length ? `${showSegmentBars?segmentCount+" groups":"Sorted accounts"} · this page` : "Sort: off → ↑ → ↓ → off · this page"}
           <span className="sr-only"> Session means the reported short window, including Codex 5h. Each later sort divides its preceding ordered group just before sorting: ½ balances card counts, P50 splits at the median value, and Gap splits at the largest value jump. P50/Gap keep ties together and put unreported values in a separate trailing group. With one sort there is no division. Multiple reset pools use the next reset; remaining uses the main window, or the lowest reported pool if no main window exists. Sorting stays within the loaded page.</span>
         </p>
         </div>
@@ -1095,7 +1095,7 @@ export default function ProviderLimits() {
       </QuotaControlDock>
       {resetListing && <p role="status" className="px-1 text-xs text-amber-600 dark:text-amber-400">
             Reset first · {resetSummary?.live ? 'Live rule' : 'Listing preview · Apply to routing'}
-            {' · '}{scopePending ? 'Checking…' : resetSummary?.applicable === false ? 'Main Codex text only' : resetSummary ? `${resetSummary.ready} ready${resetSummary.waiting ? ` · ${resetSummary.waiting} waiting (short quota empty)` : ''}` : 'Expiry not checked'}
+            {' · '}{scopePending ? 'Checking…' : resetSummary?.applicable === false ? 'Main Codex text only' : resetSummary ? `${resetSummary.matching} matching · earliest credit expiry first` : 'Expiry not checked'}
             {!scopePending && resetSummary?.unavailable > 0 && ` · ${resetSummary.unavailable} missing expiry/quota reads`}
             {!scopePending && resetSummary?.matching === 0 && resetSummary?.nextExpiry && ` · Next credit expiry ${new Date(resetSummary.nextExpiry).toLocaleDateString(undefined,{month:'short',day:'numeric'})}`}
             {resetReadError && ` · ${resetReadError}`}
