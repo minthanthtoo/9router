@@ -42,3 +42,18 @@ test('compact account sections preserve ranked order without multiplying sort di
  assert.deepEqual(groups.map(g=>[g.key,g.connections.map(c=>c.id)]),[['ready',['a','c']],['unavailable',['b','d']]]);
  assert.equal(segments.length,2);
 });
+
+test('Auto reset keeps prior half, P50 and gap groups visible in the card list',()=>{
+ const connections=Array.from({length:8},(_,i)=>({id:String(i),provider:'codex'}));
+ const quotaData=Object.fromEntries(connections.map((c,i)=>[c.id,{quotas:[{quotaType:'session',...q(90-i*10,8-i,18000)},{quotaType:'weekly',...q(80-i*10,100+i,604800)}]}]));
+ for(const division of ['half','median','gap']){
+  const sorts=[{key:'weekly-remaining',direction:'desc',division:'half'},{key:'auto-reset',direction:'asc',division}];
+  const segments=segmentVisibleConnections(connections,quotaData,sorts,now);
+  assert.ok(segments.length>1,division);
+  for(const enabled of [true,false]){
+   const visible=availabilityQuotaSegments(segments,[],quotaData,enabled,false,true);
+   assert.deepEqual(visible.map(g=>g.connections.map(c=>c.id)),segments.map(g=>g.connections.map(c=>c.id)),division);
+   assert.deepEqual(visible.map(g=>g.boundaries),segments.map(g=>g.boundaries),division);
+  }
+ }
+});

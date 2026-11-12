@@ -853,13 +853,13 @@ export default function ProviderLimits() {
   }, [autoRefresh, refreshAll, hasHydratedAutoRefresh]);
 
   const connectionSegments = useMemo(
-    () => availabilityQuotaSegments(scopePending ? [] : rotationScope && serverRotationSegments ? serverRotationSegments.map(segment => ({...segment, connections: segment.ids.map(id => connections.find(connection => connection.id === id)).filter(Boolean)})).filter(segment => segment.connections.length) : segmentVisibleConnections(connections, quotaData, quotaSorts,Date.now(),imageModel),pinnedCards,quotaData,availabilityGrouping({sorts:quotaSorts,groupAvailability}),Boolean(rotationScope&&serverRotationSegments)),
+    () => availabilityQuotaSegments(scopePending ? [] : rotationScope && serverRotationSegments ? serverRotationSegments.map(segment => ({...segment, connections: segment.ids.map(id => connections.find(connection => connection.id === id)).filter(Boolean)})).filter(segment => segment.connections.length) : segmentVisibleConnections(connections, quotaData, quotaSorts,Date.now(),imageModel),pinnedCards,quotaData,availabilityGrouping({sorts:quotaSorts,groupAvailability}),Boolean(rotationScope&&serverRotationSegments),quotaSorts.length>1||resetListing),
     [connections, quotaData, quotaSorts, scopePending,pinnedCards, rotationScope, serverRotationSegments,groupAvailability,resetListing,imageModel],
   );
   const sortedConnections = connectionSegments.flatMap(segment => segment.connections);
   const segmentCount = connectionSegments.filter(segment=>segment.connections.length).length;
   const allCardsCollapsed = sortedConnections.length > 0 && sortedConnections.every(connection=>!cardGroupVisible(quotaVisibility,connection.id,"images",legacyCardCollapse)&&!cardGroupVisible(quotaVisibility,connection.id,"text",legacyCardCollapse));
-  const showSegmentBars=availabilityGrouping({sorts:quotaSorts,groupAvailability});
+  const showSegmentBars=availabilityGrouping({sorts:quotaSorts,groupAvailability})||quotaSorts.length>1||resetListing;
   const visibleSegments = scopePending ? [] : connectionSegments.filter(segment=>segment.connections.length);
   const scrollOwner = () => {
     let owner=quotaRoot.current?.parentElement;

@@ -123,7 +123,7 @@ remain. This range is an empirical extrapolation, not a confidence interval,
 token budget or guarantee. External use and hidden provider accounting remain
 unobserved. It cannot clear quota waits, grant model access or redeem resets.
 
-## Automatic refill-time ordering and compact card sections
+## Automatic refill-time ordering and visible sequence groups
 
 `auto-reset` is an optional shared criterion, labelled Reset time with an Auto
 badge. It is unrelated to reset-credit spending. Within fresh requested-model
@@ -136,7 +136,9 @@ to retry a held job. Existing admission, model access and reset consent remain.
 
 Saved explicit short/weekly sorts are not migrated or silently published. They
 remain active and editable; inactive explicit windows are in Add sort. The normal
-card list merges display partitions into Ready/Unavailable (or one flat list with
-availability grouping off). It preserves ranking within each section and keeps
-explicit routing divisions and their decision trace in the rotation preview.
+card list preserves recursive sequence partitions and their division details for
+multi-sort rules. Optional Ready/Unavailable classification retains those
+partitions inside each section; turning classification off keeps the original
+sequence groups. Single-sort lists remain compact. The rotation preview retains
+the same routing divisions and decision trace.
 No DB migration or new dependency is required.
