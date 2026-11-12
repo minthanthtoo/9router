@@ -1103,7 +1103,7 @@ export default function ProviderLimits() {
           </p>}
       <div className="quota-segment-anchor">
         {showSegmentBars && visibleSegments[activeSegmentIndex] && <div className="quota-pinned-segment">
-          <QuotaSegmentBar compact headingId="quota-current-segment" segment={visibleSegments[activeSegmentIndex]} index={activeSegmentIndex} total={visibleSegments.length} previous={visibleSegments[activeSegmentIndex-1]?.key} next={visibleSegments[activeSegmentIndex+1]?.key} onNavigate={jumpToSegment} />
+          <QuotaSegmentBar compact headingId="quota-current-segment" segment={visibleSegments[activeSegmentIndex]} previousSegment={visibleSegments[activeSegmentIndex-1]} index={activeSegmentIndex} total={visibleSegments.length} previous={visibleSegments[activeSegmentIndex-1]?.key} next={visibleSegments[activeSegmentIndex+1]?.key} onNavigate={jumpToSegment} />
         </div>}
       </div>
 
@@ -1125,7 +1125,7 @@ export default function ProviderLimits() {
       {!connectionError && !scopePending && !connectionsLoading && !sortedConnections.length && <div role="status" className="rounded-xl border border-border p-6 text-sm text-text-muted">No configured accounts match these filters. Clear the model or choose another category.</div>}
       <div ref={quotaGrid} id="quota-account-cards" className="grid grid-cols-1 items-start md:grid-cols-2 gap-3" aria-label="Account segments">
       {visibleSegments.flatMap((segment,index)=>[
-        ...(showSegmentBars ? [<QuotaSegmentBar key={`segment-${segment.key}`} segment={segment} index={index} total={visibleSegments.length} previous={visibleSegments[index-1]?.key} next={visibleSegments[index+1]?.key} covered={index<=activeSegmentIndex} onNavigate={jumpToSegment} />] : []),
+        ...(showSegmentBars ? [<QuotaSegmentBar key={`segment-${segment.key}`} segment={segment} previousSegment={visibleSegments[index-1]} index={index} total={visibleSegments.length} previous={visibleSegments[index-1]?.key} next={visibleSegments[index+1]?.key} covered={index<=activeSegmentIndex} onNavigate={jumpToSegment} />] : []),
         ...segment.connections.map((conn) => {
           const collapsed = !cardGroupVisible(quotaVisibility,conn.id,"images",legacyCardCollapse);
           const summaryVisible = cardGroupVisible(quotaVisibility, conn.id, "summary");

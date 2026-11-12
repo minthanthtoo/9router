@@ -440,3 +440,47 @@ test('inspect historical request is a bounded read and leaves current run unchan
  fireEvent.click(screen.getByRole('button',{name:'Inspect'}));await waitFor(()=>assert.ok(screen.getByText('outcome_unknown')));
  assert.ok(screen.getByText('current'));assert.ok(calls.every(call=>call.method==='GET'));
 });
+
+test('segment separators reveal division details on hover, pin by click and dismiss accessibly',async()=>{
+ const Segment=await component('QuotaSegmentBar');
+ const boundary={mode:'gap',label:'Weekly left %',kind:'remaining',direction:'desc',min:20,max:80,missing:0,gap:{size:30,from:20,to:50}};
+ const segment={key:'ready-1',availability:'ready',rotationName:'Ready · Group 1',connections:[{id:'one'}],boundaries:[boundary]};
+ const navigate=[];
+ const view=render(React.createElement(Segment,{segment,index:0,total:2,next:'ready-2',onNavigate:key=>navigate.push(key)}));
+ const button=screen.getByRole('button',{name:'Ready · Group 1, 1 account, show division details'});
+ const root=button.closest('.quota-segment-bar');
+ assert.equal(root.dataset.depth,'0');
+ assert.equal(screen.queryByRole('region'),null);
+ fireEvent.mouseEnter(root);
+ assert.ok(screen.getByRole('region',{name:'Division details for Ready · Group 1'}));
+ fireEvent.mouseLeave(root);
+ assert.equal(screen.queryByRole('region'),null);
+ fireEvent.click(button);fireEvent.mouseLeave(root);
+ assert.equal(button.getAttribute('aria-expanded'),'true');
+ fireEvent.keyDown(button,{key:'Escape'});
+ assert.equal(screen.queryByRole('region'),null);
+ assert.equal(document.activeElement,button);
+ fireEvent.click(button);fireEvent.pointerDown(document.body);
+ assert.equal(screen.queryByRole('region'),null);
+ fireEvent.focus(button);
+ assert.ok(screen.getByRole('region'));
+ fireEvent.click(screen.getByRole('button',{name:'Next segment: ready-2'}));
+ assert.deepEqual(navigate,['ready-2']);
+ view.unmount();
+});
+
+test('nested segment separators reflect the first changed division level',async()=>{
+ const Segment=await component('QuotaSegmentBar');
+ const first={mode:'half',label:'Weekly left %',kind:'remaining',direction:'desc',min:40,max:90,startRank:1,endRank:4,parentCount:8};
+ const second={...first,label:'Short window left %',min:50,max:80};
+ const previousSegment={availability:'ready',boundaries:[first,second]};
+ const segment={key:'regular.1.2',availability:'ready',rotationName:'Ready · Group 2',connections:[{id:'one'}],boundaries:[first,{...second,min:10,max:30}]};
+ render(React.createElement(Segment,{segment,previousSegment,index:1,total:2,onNavigate:()=>{}}));
+ const button=screen.getByRole('button',{name:'Ready · Group 2, 1 account, show division details'});
+ assert.equal(button.closest('.quota-segment-bar').dataset.depth,'2');
+ assert.match(button.textContent,/Group 2/);
+ assert.doesNotMatch(button.textContent,/Ready/);
+ fireEvent.click(button);
+ assert.ok(screen.getByLabelText('Sort level 1'));
+ assert.ok(screen.getByLabelText('Sort level 2'));
+});

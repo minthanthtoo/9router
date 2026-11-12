@@ -142,3 +142,10 @@ partitions inside each section; turning classification off keeps the original
 sequence groups. Single-sort lists remain compact. The rotation preview retains
 the same routing divisions and decision trace.
 No DB migration or new dependency is required.
+
+
+Segment separators retain recursive boundaries. Availability transitions use a
+stronger dotted line, while deeper split transitions use lighter indented lines.
+The first changed boundary determines emphasis. Hover/focus exposes the existing
+range and division trace, and click pins it until Escape or an outside click.
+The pinned current-segment copy uses the same control and details.

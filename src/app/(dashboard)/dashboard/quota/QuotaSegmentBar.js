@@ -1,5 +1,5 @@
 "use client";
-import {useEffect,useState} from 'react';
+import {useEffect,useId,useRef,useState} from 'react';
 import { quotaSegmentDescription, formatQuotaSortValue, formatQuotaGap } from "../usage/components/ProviderLimits/utils";
 
 import {quotaRemainingColors} from '@/shared/components/QuotaRemainingMeter';
@@ -19,29 +19,47 @@ function SegmentDetail({detail,text}) {
  </span>;
 }
 
-export default function QuotaSegmentBar({ segment, index, total, previous, next, covered = false, headingId, onNavigate, compact=false }) {
- const boundaries=segment.boundaries?.length?segment.boundaries:segment.ordering?[segment.ordering]:[];
- const details=quotaSegmentDescription(segment),[current,setCurrent]=useState(0),[paused,setPaused]=useState(false),[hover,setHover]=useState(false);
- useEffect(()=>{
-  if(!compact||details.length<2||paused||hover||window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
-  const timer=setInterval(()=>{if(!document.hidden)setCurrent(value=>(value+1)%details.length);},3500);
-  return()=>clearInterval(timer);
- },[compact,details.length,paused,hover]);
- const name=(segment.resetGroup||segment.availability||['ready','unavailable'].includes(segment.key))?segment.rotationName:segment.key==='disabled'?'Disabled accounts':segment.key==='pinned'?'Pinned':segment.rotationName ? `${segment.rotationName} ${index+1}` : `Segment ${segment.key}`;
- return <div className={`quota-segment-bar col-span-full min-w-0 ${compact?'is-compact':''} ${covered?'invisible':''}`} data-availability={segment.availability||undefined} inert={covered} aria-hidden={covered || undefined} onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)} onFocus={()=>setHover(true)} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setHover(false);}}>
+export default function QuotaSegmentBar({ segment, previousSegment, index, total, previous, next, covered = false, headingId, onNavigate, compact=false }) {
+ const boundaries = segment.boundaries?.length ? segment.boundaries : segment.ordering ? [segment.ordering] : [];
+ const details = quotaSegmentDescription(segment);
+ const [hover, setHover] = useState(false);
+ const [pinned, setPinned] = useState(false);
+ const root = useRef(null);
+ const trigger = useRef(null);
+ const panelId = useId();
+ const changedBoundary = boundaries.findIndex((boundary, i) => JSON.stringify(boundary) !== JSON.stringify(previousSegment?.boundaries?.[i]));
+ const depth = !previousSegment || previousSegment.availability !== segment.availability ? 0 : changedBoundary < 0 ? boundaries.length : changedBoundary + 1;
+ const name = (segment.resetGroup || segment.availability || ['ready','unavailable'].includes(segment.key)) ? segment.rotationName : segment.key === 'disabled' ? 'Disabled accounts' : segment.key === 'pinned' ? 'Pinned' : segment.rotationName ? `${segment.rotationName} ${index+1}` : `Segment ${segment.key}`;
+ const label = depth > 0 ? name.replace(/^(Ready|Unavailable) · /, '') : name;
+ const expanded = details.length > 0 && (hover || pinned);
+ useEffect(() => {
+  if (!pinned) return;
+  const dismiss = event => {
+   if (!root.current?.contains(event.target)) { setPinned(false); setHover(false); }
+  };
+  document.addEventListener('pointerdown', dismiss);
+  return () => document.removeEventListener('pointerdown', dismiss);
+ }, [pinned]);
+ return <div ref={root} className={`quota-segment-bar col-span-full min-w-0 ${compact?'is-compact':''} ${covered?'invisible':''}`} data-availability={segment.availability||undefined} data-depth={Math.min(depth,3)} style={{'--segment-indent':`${Math.min(depth,3)*8}px`}} inert={covered} aria-hidden={covered || undefined}
+  onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)}
+  onFocus={()=>setHover(true)} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setHover(false);}}
+  onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();trigger.current?.focus();setPinned(false);setHover(false);}}}>
   <div className="quota-segment-heading flex min-w-0 items-center gap-2">
-   <span aria-hidden="true" className="material-symbols-outlined shrink-0 text-text-muted" style={{fontSize:16}}>{segment.resetGroup&&segment.resetGroup!=='regular'?'restart_alt':segment.key==='pinned'?'push_pin':'account_tree'}</span>
-   <h2 id={headingId || `quota-segment-${segment.key}`} className="truncate text-[13px] font-semibold text-text-main">{name}</h2>
-   <span className="shrink-0 text-xs tabular-nums text-text-muted">{segment.connections.length} {segment.connections.length===1?'card':'cards'}</span>
-   {compact&&details.length>0&&<button type="button" className="quota-segment-ticker min-w-0 flex-1 text-left" aria-label={`Next segment detail. ${details.join("; ")}`} onClick={()=>{setPaused(true);setCurrent(value=>(value+1)%details.length);}} title={details.join('\n')}><span key={`${segment.key}-${current}`} className="quota-segment-tick text-xs text-text-muted" aria-hidden="true"><SegmentDetail detail={boundaries[current%details.length]} text={details[current%details.length]}/></span><span className="sr-only">{details.join('; ')}</span></button>}
-   {compact&&details.length>1&&<button type="button" aria-pressed={paused} aria-label={paused?'Play segment details':'Pause segment details'} onClick={()=>setPaused(value=>!value)} className="quota-ticker-pause"><span aria-hidden="true" className="material-symbols-outlined text-[16px]">{paused?'play_arrow':'pause'}</span></button>}
-   <span className="ml-auto shrink-0 text-[11px] tabular-nums text-text-muted" aria-label={`Segment ${index+1} of ${total}`}>{index+1}/{total}</span>
-   <div className="flex shrink-0 gap-1" role="group" aria-label={`Navigate from segment ${segment.key}`}>
-    {[[previous,'Previous segment','keyboard_double_arrow_up'],[next,'Next segment','keyboard_double_arrow_down']].map(([key,label,icon])=><button key={label} type="button" disabled={!key} aria-label={key?`${label}: ${key}`:label} title={key?`${label} ${key}`:label} onClick={()=>onNavigate(key)} className="flex size-8 items-center justify-center rounded-md border border-transparent text-text-muted transition-colors hover:border-border hover:bg-surface-2 hover:text-primary disabled:cursor-default disabled:opacity-30"><span aria-hidden="true" className="material-symbols-outlined" style={{fontSize:18}}>{icon}</span></button>)}
+   <h2 id={headingId || `quota-segment-${segment.key}`} className="min-w-0">
+    <button ref={trigger} type="button" className="quota-segment-trigger" aria-label={`${name}, ${segment.connections.length} ${segment.connections.length===1?'account':'accounts'}${details.length?', show division details':''}`} aria-expanded={details.length ? expanded : undefined} aria-controls={details.length ? panelId : undefined} onClick={()=>{setPinned(value=>!value);setHover(false);}}>
+     <span aria-hidden="true" className="material-symbols-outlined">{segment.key==='pinned'?'push_pin':depth===0?'account_tree':'subdirectory_arrow_right'}</span>
+     <span className="truncate">{label}</span>
+     <span className="quota-segment-count">{segment.connections.length}</span>
+    </button>
+   </h2>
+   <span className="quota-segment-rule" aria-hidden="true" />
+   <span className="shrink-0 text-[11px] tabular-nums text-text-muted" aria-label={`Segment ${index+1} of ${total}`}>{index+1}/{total}</span>
+   <div className="flex shrink-0" role="group" aria-label={`Navigate from segment ${segment.key}`}>
+    {[[previous,'Previous segment','keyboard_double_arrow_up'],[next,'Next segment','keyboard_double_arrow_down']].map(([key,label,icon])=><button key={label} type="button" disabled={!key} aria-label={key?`${label}: ${key}`:label} title={key?`${label} ${key}`:label} onClick={()=>onNavigate(key)} className="flex size-8 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-2 hover:text-primary disabled:cursor-default disabled:opacity-30"><span aria-hidden="true" className="material-symbols-outlined" style={{fontSize:18}}>{icon}</span></button>)}
    </div>
   </div>
-  {!compact&&details.length>0&&<div className="quota-segment-values flex min-w-0 items-center gap-2 overflow-x-auto whitespace-nowrap text-xs text-text-muted" tabIndex={0} aria-label={`Value boundaries for segment ${segment.key}`}>
-   {details.map((text,i)=><SegmentDetail key={i} detail={boundaries[i]} text={text}/>)}
+  {expanded&&<div id={panelId} className="quota-segment-values" role="region" aria-label={`Division details for ${name}`}>
+   {details.map((text,i)=><div key={i} className="quota-segment-level" style={{paddingInlineStart:`${i*8}px`}}><span className="quota-segment-level-number" aria-label={`Sort level ${i+1}`}>{i+1}</span><SegmentDetail detail={boundaries[i]} text={text}/></div>)}
   </div>}
  </div>;
 }
