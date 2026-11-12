@@ -7,6 +7,12 @@ import { applicableRotationQuotas, resetCreditPriority, scopeMatches } from '@/s
 // Only real text dispatch invokes this; previews and background quota reads never spend credits.
 export async function prepareAutomaticCreditReset(connections, policy, model, { reset, readUsage, readCredits } = {}) {
   if (!scopeMatches('codex', 'codex:main', model)) return { blocked: [] };
+  async function clearRecoveredQuotaLock(connection) {
+    if (Number(connection.errorCode) === 429 && connection[`modelLock_${model}`]) {
+      await updateProviderConnection(connection.id, {[`modelLock_${model}`]: null});
+      connection[`modelLock_${model}`] = null;
+    }
+  }
   async function refreshConfirmed(connection, attemptId) {
     readUsage ||= (await import('@/app/api/usage/[connectionId]/route.js')).GET;
     readCredits ||= (await import('@/app/api/usage/[connectionId]/codex-reset-credits/route.js')).GET;
@@ -19,10 +25,7 @@ export async function prepareAutomaticCreditReset(connections, policy, model, { 
     const fresh = (await readRotationSnapshots([refreshed]))[connection.id];
     const after = applicableRotationQuotas(fresh, 'codex', model, Date.now());
     if (!after.length || after.some(q => q.remaining === 0) || !after.some(q => q.window === 'session' && q.remaining > 0)) return false;
-    if (Number(refreshed.errorCode) === 429 && refreshed[`modelLock_${model}`]) {
-      await updateProviderConnection(connection.id, { [`modelLock_${model}`]: null });
-      refreshed[`modelLock_${model}`] = null;
-    }
+    await clearRecoveredQuotaLock(refreshed);
     Object.assign(connection, refreshed);
     await completeCreditResetRecovery(attemptId);
     return true;
@@ -35,12 +38,30 @@ export async function prepareAutomaticCreditReset(connections, policy, model, { 
   }
   if (!policy?.enabled || !policy.resetPriority?.enabled || policy.resetPriority.autoReset !== true) return { blocked: [...held] };
   let snapshots = await readRotationSnapshots(connections);
-  const now = Date.now();
+  let now = Date.now();
   const ordinaryPolicy = { ...policy, resetPriority: { ...policy.resetPriority, autoReset: false } };
   const ordinaryReady = () => rotationPool(connections, snapshots, ordinaryPolicy, { provider: 'codex', model, resetHolds: holds.filter(row => held.has(row.connectionId)) }).ranked.length > 0;
   const exhaustedIds = () => connections.filter(c => applicableRotationQuotas(snapshots[c.id], 'codex', model).some(q => q.remaining === 0)).map(c => c.id);
   // Use ordinary eligible accounts first, including unknown capacity; a reset is a last resort.
   if (ordinaryReady()) return { blocked: [...new Set([...held, ...exhaustedIds()])] };
+  if (!exhaustedIds().length) return {blocked: [...held]};
+  // Confirm the whole exhausted pool before spending on one matching account.
+  for (const connection of connections.filter(c => !held.has(c.id) && c.isActive !== false && !accountModelAccess(c,model,snapshots[c.id]?.modelAccess).reason)) {
+    try {
+      const wasExhausted = applicableRotationQuotas(snapshots[connection.id], 'codex', model).some(quota => quota.remaining === 0);
+      readUsage ||= (await import('@/app/api/usage/[connectionId]/route.js')).GET;
+      const context = {params: Promise.resolve({connectionId: connection.id})};
+      if (!(await readUsage(new Request('http://localhost/internal-quota-read?force=1'), context)).ok) return {blocked: [...new Set([...held, ...exhaustedIds()])]};
+      const refreshed = await getProviderConnectionById(connection.id);
+      if (refreshed) Object.assign(connection, refreshed);
+      const current = (await readRotationSnapshots([connection]))[connection.id];
+      const quotas = applicableRotationQuotas(current, 'codex', model);
+      if (wasExhausted && quotas.length && !quotas.some(quota => quota.remaining === 0) && quotas.some(quota => quota.window === 'session' && quota.remaining > 0)) await clearRecoveredQuotaLock(connection);
+    } catch { return {blocked: [...new Set([...held, ...exhaustedIds()])]}; }
+  }
+  snapshots = await readRotationSnapshots(connections);
+  now = Date.now();
+  if (ordinaryReady()) return {blocked: [...new Set([...held, ...exhaustedIds()])]};
   const matches = connections.filter(c => !held.has(c.id) && c.isActive !== false && !accountModelAccess(c,model,snapshots[c.id]?.modelAccess).reason && resetCreditPriority(c, snapshots[c.id], policy, { provider: 'codex', model, now }))
     .sort((a, b) => snapshots[a.id].credits.expiresAt - snapshots[b.id].credits.expiresAt);
   const blocked = [...held];

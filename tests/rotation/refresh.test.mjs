@@ -55,3 +55,22 @@ test('monitor status exposes server disablement and sanitized settings-read fail
   assert.ok(!status.lastError.includes('private database'));
  }finally{globalThis.setInterval=interval;globalThis.clearInterval=clear;if(prior===undefined)delete process.env.DISABLE_ROTATION_SNAPSHOT_REFRESH;else process.env.DISABLE_ROTATION_SNAPSHOT_REFRESH=prior;delete globalThis.__rotationSnapshotRefresh;delete globalThis.__refreshFixture;}
 });
+
+test('a reset crossed since observation forces a read inside the normal cache interval',async()=>{
+ const now=Date.now(),calls=[];
+ const api=await fixture({connections:async()=>[{id:'due'},{id:'fresh'},{id:'already-read'}],snapshots:async()=>({due:{observedAt:now-30000,quotas:[{resetAt:now-1000}]},fresh:{observedAt:now-30000,quotas:[{resetAt:now+60000}]},'already-read':{observedAt:now-500,quotas:[{resetAt:now-1000}]}}),usage:async(_,ctx)=>{calls.push((await ctx.params).connectionId);return Response.json({quotas:{session:{}}});}});
+ await api.refreshRotationSnapshots('codex');assert.deepEqual(calls,['due']);
+});
+test('quota read failures still allow an independent reset-credit expiry read',async()=>{
+ const calls=[];const api=await fixture({connections:async()=>[{id:'failed'}],usage:async()=>Response.json({error:'unavailable'},{status:503}),credits:async(_,ctx)=>{calls.push((await ctx.params).connectionId);return Response.json({});}});
+ const result=await api.refreshRotationSnapshots('codex',true);assert.deepEqual(calls,['failed']);assert.equal(result.errors.length,1);
+});
+test('idle server monitor notices newly enabled policies without a browser restarting it',async()=>{
+ let settings={},tick;const calls=[];const disabled=process.env.DISABLE_ROTATION_SNAPSHOT_REFRESH;delete process.env.DISABLE_ROTATION_SNAPSHOT_REFRESH;
+ const api=await fixture({settings:async()=>settings,connections:async({provider})=>{calls.push(provider);return[];}});
+ const interval=globalThis.setInterval,clear=globalThis.clearInterval;
+ globalThis.setInterval=fn=>{tick=fn;return{unref(){}};};globalThis.clearInterval=()=>{throw Error('idle monitor must stay available')};
+ try{api.startRotationSnapshotRefresh();for(let i=0;i<30&&globalThis.__rotationSnapshotRefresh.tick;i++)await new Promise(setImmediate);
+ settings={providerStrategies:{codex:{rotationSequence:{version:1,enabled:true,sorts:[{key:'weekly-remaining',direction:'desc',division:'half'}],resetPriority:{enabled:false,days:3,weeklyBelow:null}}}}};await tick();assert.deepEqual(calls,['codex']);
+ }finally{globalThis.setInterval=interval;globalThis.clearInterval=clear;delete globalThis.__rotationSnapshotRefresh;if(disabled===undefined)delete process.env.DISABLE_ROTATION_SNAPSHOT_REFRESH;else process.env.DISABLE_ROTATION_SNAPSHOT_REFRESH=disabled;}
+});

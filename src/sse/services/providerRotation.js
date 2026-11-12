@@ -53,3 +53,8 @@ export function rotationPool(connections, snapshots, policy, { provider, model =
   const evaluation = evaluateRotation(eligible, snapshots, policy, { provider, model, now, onStep });
   return { ...evaluation, blocked, ...(admission ? { admission } : {}) };
 }
+
+export function rotationWaitingIds(pool) {
+  const temporary = new Set(['Cooling down', 'Quota exhausted', 'Quota wait', 'Image quota wait', 'Outcome pending', 'Reset pending verification', 'Image hold or quota wait']);
+  return new Set([...pool.waiting, ...pool.blocked.filter(row => temporary.has(row.reason))].map(row => row.connection.id));
+}

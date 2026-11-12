@@ -1,6 +1,9 @@
 # Automatic deployment
 
-Merge into `master` → regression tests → Docker build → isolated health check → production.
+Push to `master` → regression tests → Docker build → isolated health check.
+Release through **Run workflow**, selecting `master` and enabling **deploy**.
+Local commits do not trigger GitHub Actions. Pull requests and master pushes run
+checks. Feature-branch pushes are checked through their pull request.
 Pull requests run checks without server access. This workflow is limited to
 `minthanthtoo/9router`; it cannot deploy from an upstream fork or another branch.
 
@@ -21,8 +24,8 @@ Pull requests run checks without server access. This workflow is limited to
 4. In the GitHub `production` environment set secrets `DEPLOY_SSH_KEY` and
    `DEPLOY_KNOWN_HOSTS` using the verified host key. Set `DEPLOY_HOST` to the host.
    Restrict the environment to `master`. No manual reviewer is needed for auto-deploy.
-5. Set repository variable `AUTO_DEPLOY=true` after the production branch is current.
-   Leave it `false` to pause releases without stopping CI.
+5. Keep repository variable `AUTO_DEPLOY=false` for deliberate releases.
+   Setting it to `true` opts back into deployment on each master push.
 
 ## Preserved state and recovery
 
@@ -45,8 +48,8 @@ backup and per-release `result.json` are retained for recovery. No automatic pru
 of serving images or backups is performed; low disk space stops image loading.
 
 Check deployment results under the GitHub Actions **Check and deploy** workflow.
-Retry an idle-deferred deployment with **Run workflow** on `master`. A later push
-also retries with the newest commit. Test requests, credit redemption and clearing
+Retry an idle-deferred deployment with **Run workflow** on `master`, enabling
+**deploy**. Check free space and active work before retrying. Test requests, credit redemption and clearing
 held image results are never part of deployment checks.
 
 To change production branch/repository, update both `production.yml` and the

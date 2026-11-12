@@ -29,8 +29,8 @@ export default function QuotaSegmentBar({ segment, previousSegment, index, total
  const panelId = useId();
  const changedBoundary = boundaries.findIndex((boundary, i) => JSON.stringify(boundary) !== JSON.stringify(previousSegment?.boundaries?.[i]));
  const depth = !previousSegment || previousSegment.availability !== segment.availability ? 0 : changedBoundary < 0 ? boundaries.length : changedBoundary + 1;
- const name = (segment.resetGroup || segment.availability || ['ready','unavailable'].includes(segment.key)) ? segment.rotationName : segment.key === 'disabled' ? 'Disabled accounts' : segment.key === 'pinned' ? 'Pinned' : segment.rotationName ? `${segment.rotationName} ${index+1}` : `Segment ${segment.key}`;
- const label = depth > 0 ? name.replace(/^(Ready|Unavailable) · /, '') : name;
+ const name = (segment.resetGroup || segment.availability || ['ready','waiting','unavailable'].includes(segment.key)) ? segment.rotationName : segment.key === 'disabled' ? 'Disabled accounts' : segment.key === 'pinned' ? 'Pinned' : segment.rotationName ? `${segment.rotationName} ${index+1}` : `Segment ${segment.key}`;
+ const label = depth > 0 ? name.replace(/^(Ready|Waiting|Unavailable) · /, '') : name;
  const expanded = details.length > 0 && (hover || pinned);
  useEffect(() => {
   if (!pinned) return;

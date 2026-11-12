@@ -136,7 +136,7 @@ test('availability grouping control works with zero, one and multiple sorts',asy
   return React.createElement(Bar,{sorts:policy.sorts,options:rotationMetrics('codex'),groupAvailability:availabilityGrouping(policy),onGroupAvailabilityChange:value=>setPolicy({...policy,groupAvailability:value}),onChange:sorts=>setPolicy(updateRotationSorts(policy,sorts))});
  }
  render(React.createElement(Example));
- const button=screen.getByRole('button',{name:'Group Ready and Unavailable accounts'});
+ const button=screen.getByRole('button',{name:'Group Ready, Waiting and Unavailable accounts'});
  assert.equal(button.disabled,false);assert.equal(button.getAttribute('aria-pressed'),'false');
  fireEvent.click(button);assert.equal(button.getAttribute('aria-pressed'),'true');
  fireEvent.click(button);assert.equal(button.getAttribute('aria-pressed'),'false');

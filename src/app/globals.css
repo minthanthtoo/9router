@@ -658,6 +658,7 @@ main:has(.quota-workspace) > .landing-grid { opacity: .02; }
 .quota-workspace .quota-actions .material-symbols-outlined { font-size: 20px; }
 .quota-segment-bar { position: relative; min-height: 32px; padding: 0; padding-inline-start: var(--segment-indent,0px); --segment-tone: var(--color-text-muted); }
 .quota-segment-bar[data-availability="ready"] { --segment-tone: color-mix(in srgb,#22c55e 55%,var(--color-text-muted)); }
+.quota-segment-bar[data-availability="waiting"] { --segment-tone: color-mix(in srgb,#f59e0b 65%,var(--color-text-muted)); }
 .quota-segment-heading { min-height: 32px; }
 .quota-segment-trigger { display: flex; align-items: center; gap: 6px; max-width: 100%; min-height: 32px; border-radius: 5px; padding-inline: 4px; font-size: 12px; font-weight: 600; color: var(--color-text-main); }
 .quota-segment-trigger:hover, .quota-segment-trigger[aria-expanded="true"] { background: var(--color-surface-2); }

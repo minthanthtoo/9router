@@ -1,6 +1,6 @@
 import { accountContext, estimateCapacity } from '@/shared/utils/quotaCapacity.mjs';
 import { readTextModelPolicies } from '@/lib/db/repos/textModelPolicyRepo.js';
-import { rotationPool } from "@/sse/services/providerRotation.js";
+import { rotationPool, rotationWaitingIds } from "@/sse/services/providerRotation.js";
 import { emptyRotation, validateRotation, evaluateRotation, applicableRotationQuotas, scopeMatches } from "@/shared/utils/rotationSequence.mjs";
 import { readRotationPolicy, readRotationSnapshots, readCreditResetHolds } from "@/lib/db/repos/providerRotationRepo.js";
 import { rotationPreviewInfo } from "@/shared/utils/rotationPreview.mjs";
@@ -156,13 +156,15 @@ export async function GET(request) {
       const displayOrder = evaluateRotation(sortedConnections, snapshots, displayPolicy, {provider,model:rotationModel,includeExhausted:true});
       resetPrioritySummary = {...resetPrioritySummary, enabled: displayPolicy.resetPriority.enabled, matching: displayOrder.ranked.filter(row=>row.urgent).length};
       rotationHints = Object.fromEntries(displayOrder.ranked.filter(row=>row.resetGroup).map(row=>[row.connection.id,{group:row.resetGroup,expiresAt:row.expiry}]));
-      const unavailable = new Set([...evaluation.waiting, ...(evaluation.blocked || [])].map(row=>row.connection.id));
+      const waiting = rotationWaitingIds(evaluation);
+      const unavailable = new Set((evaluation.blocked || []).filter(row=>!waiting.has(row.connection.id)).map(row=>row.connection.id));
       sortedConnections = displayOrder.ranked.map(row=>row.connection);
       rotationSegments = displayOrder.segments.map(segment => ({
         key:segment.key,
         ids:segment.rows.map(row=>row.connection.id),
         boundaries:segment.boundaries,
-        unavailableIds:segment.rows.filter(row=>unavailable.has(row.connection.id)||applicableRotationQuotas(snapshots[row.connection.id],provider,rotationModel).some(quota=>quota.remaining===0)).map(row=>row.connection.id),
+        waitingIds:segment.rows.filter(row=>waiting.has(row.connection.id)).map(row=>row.connection.id),
+        unavailableIds:segment.rows.filter(row=>unavailable.has(row.connection.id)).map(row=>row.connection.id),
         rotationName:"Rotation segment",
       }));
     }

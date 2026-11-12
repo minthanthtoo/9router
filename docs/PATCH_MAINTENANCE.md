@@ -149,3 +149,23 @@ stronger dotted line, while deeper split transitions use lighter indented lines.
 The first changed boundary determines emphasis. Hover/focus exposes the existing
 range and division trace, and click pins it until Escape or an outside click.
 The pinned current-segment copy uses the same control and details.
+
+
+## Server freshness and temporary waits
+
+Live text dispatch refreshes due snapshots once per request through the shared
+provider refresh job. The server monitor keeps checking for enabled policies
+when idle. A reset crossed since a saved observation expires the read cache.
+Credit-expiry reads proceed independently when a usage read fails.
+
+Before automatic credit redemption, the full exhausted candidate pool is read
+again. A recovered ordinary account prevents spending, and incomplete reads
+defer redemption. Confirmed quota recovery can release its corresponding 429
+model lock. Existing consent and durable redemption fencing remain required.
+
+Card availability uses server-provided waiting IDs for temporary quota, cooldown
+and verification states. Ready, Waiting and Unavailable each retain sequence
+divisions. Turning this display grouping off preserves sequence order.
+
+Fork CI checks master pushes and pull requests. Deliberate releases use a manual
+dispatch with deploy enabled; AUTO_DEPLOY can opt back into master-push releases.

@@ -282,10 +282,22 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       ? allConnections.filter((connection) => Boolean(geminiQuotaProjectId(connection)))
       : allConnections;
     const textPolicies = options?.capability === 'chat' ? await readTextModelPolicies(connections) : null;
-    const admissionSnapshots = options?.capability==='chat' || quotaAwareImage ? await readRotationSnapshots(connections) : {};
     const requestState = options?.requestState || {};
     requestState.unavailableReason=null;
     if(options?.capability==='chat' && !requestState.textRotationPolicy) requestState.textRotationPolicy=structuredClone((await getSettings()).providerStrategies?.[providerId]?.rotationSequence || emptyRotation());
+    if (options?.capability === 'chat' && requestState.textRotationPolicy?.enabled && process.env.DISABLE_ROTATION_SNAPSHOT_REFRESH !== '1' && !options?.peekOnly && !requestState.quotaReadAttempted) {
+      requestState.quotaReadAttempted = true;
+      try {
+        const {refreshRotationSnapshots} = await import('@/shared/services/rotationSnapshotRefresh.js');
+        await refreshRotationSnapshots(providerId, requestState.textRotationPolicy.resetPriority?.enabled);
+        const refreshed = new Map((await getProviderConnections({provider: providerId, isActive: true})).map(connection => [connection.id, connection]));
+        for (const connection of connections) {
+          const current = refreshed.get(connection.id);
+          if (current) Object.assign(connection, current);
+        }
+      } catch (error) { log.warn('ROTATION', `Quota refresh unavailable: ${error.message}`); }
+    }
+    const admissionSnapshots = options?.capability==='chat' || quotaAwareImage ? await readRotationSnapshots(connections) : {};
     const automaticResetBlocked = new Set();
     let automaticResetReady = null;
     if (providerId === 'codex' && options?.capability === 'chat' && !options?.peekOnly) {

@@ -14,16 +14,17 @@ export async function refreshRotationSnapshots(provider, includeCredits = false)
     const errors = [];
     for (const connection of connections) {
       const cached = existing[connection.id];
-      const fresh = cached && now >= cached.observedAt && now - cached.observedAt < SNAPSHOT_MAX_AGE_MS / 2;
+      const resetDue = cached?.quotas?.some(quota => Number.isFinite(quota.resetAt) && cached.observedAt < quota.resetAt && quota.resetAt <= now);
+      const fresh = cached && !resetDue && now >= cached.observedAt && now - cached.observedAt < SNAPSHOT_MAX_AGE_MS / 2;
       const creditFresh = cached?.credits && now >= cached.credits.observedAt && now - cached.credits.observedAt < SNAPSHOT_MAX_AGE_MS / 2;
       try {
         if (!fresh) {
           const response = await readUsage(new Request('http://localhost/api/usage/' + connection.id), { params: Promise.resolve({ connectionId: connection.id }) });
-          if (!response.ok) { errors.push({ id: connection.id, message: 'Quota read failed' }); continue; }
-          const usage = await response.json();
-          if (!usage.quotas) { errors.push({ id: connection.id, message: 'Quota unavailable' }); continue; }
+          if (!response.ok) { errors.push({ id: connection.id, message: 'Quota read failed' }); }
+          const usage = response.ok ? await response.json() : null;
+          if (response.ok && !usage?.quotas) { errors.push({ id: connection.id, message: 'Quota unavailable' }); }
         }
-      } catch { errors.push({ id: connection.id, message: 'Quota read failed' }); continue; }
+      } catch { errors.push({ id: connection.id, message: 'Quota read failed' }); }
       if (provider === 'codex' && includeCredits && !creditFresh) {
         try {
           const response = await readCredits(new Request('http://localhost/api/usage/' + connection.id + '/codex-reset-credits'), { params: Promise.resolve({ connectionId: connection.id }) });
@@ -53,7 +54,7 @@ export function startRotationSnapshotRefresh() {
     try {
       const settings = await getSettings();
       const policies=monitoringPolicies(settings);
-      if (!policies.size) { clearInterval(state.timer); state.timer = null; return; }
+      if (!policies.size) return;
       const failures = [];
       for (const [provider, sequence] of policies) {
         try {

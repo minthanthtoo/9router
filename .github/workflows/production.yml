@@ -4,8 +4,13 @@ on:
   pull_request:
     branches: [master]
   push:
-    branches: ['**']
+    branches: [master]
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy the checked master revision
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -79,7 +84,8 @@ jobs:
       github.repository == 'minthanthtoo/9router' &&
       github.ref == 'refs/heads/master' &&
       github.event_name != 'pull_request' &&
-      vars.AUTO_DEPLOY == 'true'
+      ((github.event_name == 'workflow_dispatch' && inputs.deploy == true) ||
+       (github.event_name == 'push' && vars.AUTO_DEPLOY == 'true'))
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     environment: production

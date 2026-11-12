@@ -7,10 +7,10 @@ import {existsSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const require=createRequire(new URL('../package.json',import.meta.url)),esbuild=require('esbuild');
-async function fixture({consent=true,uncertain=false,positive=false,providerRecovered=false,holds=[],other=null}={}) {
+async function fixture({consent=true,uncertain=false,positive=false,providerRecovered=false,holds=[],other=null,otherRecovered=false,readFailure=false,onRead=()=>{}}={}) {
  const now=Date.now(),connection={id:'empty',provider:'codex',isActive:true,errorCode:429,'modelLock_gpt-6-sol':new Date(now+3600000).toISOString()};
  const policy={version:1,enabled:true,sorts:[],resetPriority:{enabled:true,days:3,weeklyBelow:30,autoReset:consent}};
- const quota=remaining=>({provider:'codex',observedAt:now,credits:{availableCount:1,observedAt:now,expiresAt:now+86400000},quotas:[{id:'session',window:'session',scope:'codex:main',remaining,resetAt:now+3600000},{id:'weekly',window:'weekly',scope:'codex:main',remaining:remaining?70:0,resetAt:now+86400000}]});
+ const quota=remaining=>({provider:'codex',observedAt:Date.now(),credits:{availableCount:1,observedAt:now,expiresAt:now+86400000},quotas:[{id:'session',window:'session',scope:'codex:main',remaining,resetAt:now+3600000},{id:'weekly',window:'weekly',scope:'codex:main',remaining:remaining?70:0,resetAt:now+86400000}]});
  const connections=[connection,...(other?[{id:'other',provider:'codex',isActive:other!=='disabled',...(other==='locked'?{errorCode:503,'modelLock_gpt-6-sol':new Date(now+3600000).toISOString()}: {})}]:[])];
  const f={policy,connection,connections,otherData:other==='unknown'?null:quota(other==='empty'?0:80),data:quota(positive?70:0),calls:[],holds};globalThis.__autoResetTest=f;
  const mocks={
@@ -27,14 +27,14 @@ async function fixture({consent=true,uncertain=false,positive=false,providerReco
  const m=new Module(resolve(root,'tests/rotation/auto-fixture.cjs'));m.filename=resolve(root,'tests/rotation/auto-fixture.cjs');m._compile(result.outputFiles[0].text,m.filename);
  const run=(model='gpt-6-sol')=>m.exports.prepareAutomaticCreditReset(connections,policy,model,{
   reset:async(_,ctx)=>{f.calls.push('reset');f.sent=true;assert.ok(ctx.automaticCycle);if(uncertain)throw Error('timeout');return Response.json({reset:true,redeemRequestId:'attempt'})},
-  readUsage:async()=>{f.calls.push('read-usage');f.data=quota(f.sent||providerRecovered||holds.some(h=>h.state==='confirmed')?80:0);return Response.json({})},
+  readUsage:async(_,ctx)=>{onRead();f.calls.push('read-usage');if(readFailure)return Response.json({},{status:503});if((await ctx.params).connectionId==='other'){if(otherRecovered)f.otherData=quota(80);}else f.data=quota(f.sent||providerRecovered||holds.some(h=>h.state==='confirmed')?80:0);return Response.json({})},
   readCredits:async()=>{f.calls.push('read-credits');return Response.json({})},
  });
  return {f,run};
 }
 test('zero quota reset waits for confirmed reset and fresh allowance before becoming ready',async()=>{
  const {f,run}=await fixture();assert.deepEqual(await run(),{blocked:[],readyId:'empty'});
- assert.deepEqual(f.calls,['read-usage','read-credits','reset','read-usage','read-credits','clear-lock','recovered']);assert.equal(f.connection['modelLock_gpt-6-sol'],null);
+ assert.deepEqual(f.calls,['read-usage','read-usage','read-credits','reset','read-usage','read-credits','clear-lock','recovered']);assert.equal(f.connection['modelLock_gpt-6-sol'],null);
 });
 test('no consent, positive quota and unknown outcomes never bypass confirmed recovery',async()=>{
  for(const options of [{consent:false},{positive:true},{uncertain:true},{holds:[{connectionId:'empty',state:'unknown',id:'old'}]}]){
@@ -84,7 +84,8 @@ test('image and separate Codex allowance models never redeem or reconcile main r
 test('a fresh provider read showing recovery prevents an unnecessary credit spend',async()=>{
  const {f,run}=await fixture({providerRecovered:true});
  assert.deepEqual(await run(),{blocked:[]});
- assert.deepEqual(f.calls,['read-usage','read-credits']);
+ assert.deepEqual(f.calls,['read-usage','clear-lock']);
+ assert.equal(f.connection['modelLock_gpt-6-sol'],null);
 });
 
 test('automatic reset is last resort across the full eligible pool, not just matching credits',async()=>{
@@ -109,4 +110,24 @@ test('preview and selection use ordinary ready accounts before reset-required pr
  assert.equal(pool.ranked.some(row=>row.connection.id==='empty'),false);
  const fallback=rotationPool([f.connection],snapshots,f.policy,{provider:'codex',model:'gpt-6-sol'});
  assert.equal(fallback.candidates[0].id,'empty');
+});
+
+test('recovery on another exhausted account is re-read before spending a reset credit',async()=>{
+ const {f,run}=await fixture({other:'empty',otherRecovered:true});
+ assert.deepEqual(await run(),{blocked:['empty']});
+ assert.equal(f.calls.includes('reset'),false);
+ assert.equal(f.calls.filter(call=>call==='read-usage').length,2);
+});
+test('an incomplete pool recheck prevents automatic credit redemption',async()=>{
+ const {f,run}=await fixture({readFailure:true});
+ assert.deepEqual(await run(),{blocked:['empty']});
+ assert.equal(f.calls.includes('reset'),false);
+});
+
+test('pool rechecks advance the eligibility clock before matching fresh reset evidence',async()=>{
+ const original=Date.now;let now=original();Date.now=()=>now;
+ try{
+  const {run}=await fixture({onRead:()=>{now+=100;}});
+  assert.equal((await run()).readyId,'empty');
+ }finally{Date.now=original;}
 });

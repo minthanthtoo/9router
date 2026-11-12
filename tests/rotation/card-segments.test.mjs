@@ -16,12 +16,12 @@ test('disabled cards follow all active segments even when pinned; re-enabling re
  assert.deepEqual(pinnedQuotaSegments([],[]),[]);
 });
 
-test('card display has at most Ready and Unavailable groups, with pins staying inside availability',()=>{
+test('card display separates Ready, Waiting and Unavailable while retaining pin order',()=>{
  const ready={id:'ready',isActive:true},zero={id:'zero',isActive:true},off={id:'off',isActive:false},waiting={id:'waiting'},blocked={id:'blocked'};
  const segments=[{key:'regular.1',connections:[zero,ready,off]},{key:'waiting',connections:[waiting]},{key:'unavailable',connections:[blocked]}];
  const data={zero:{quotas:[{quotaType:'session',remainingPercentage:0}]}};
  const grouped=availabilityQuotaSegments(segments,['off','zero'],data,true);
- assert.deepEqual(grouped.map(group=>[group.key,group.connections.map(c=>c.id)]),[['ready',['ready']],['unavailable',['zero','off','waiting','blocked']]]);
+ assert.deepEqual(grouped.map(group=>[group.key,group.connections.map(c=>c.id)]),[['ready',['ready']],['waiting',['zero','waiting']],['unavailable',['off','blocked']]]);
  const flat=availabilityQuotaSegments(segments,[],data,false);
  assert.equal(flat.length,1);assert.equal(flat[0].key,'all');assert.equal(flat[0].connections.length,5);
 });
@@ -56,4 +56,12 @@ test('sequence groups retain boundaries inside availability groups and when avai
 
 test('quota page reset controls use the same hourglass as provider rotation',()=>{
  assert.deepEqual(QUOTA_SORT_OPTIONS.filter(option=>option.kind==='reset').map(option=>option.icon),['hourglass_empty','hourglass_empty','hourglass_empty']);
+});
+
+test('temporary server waits retain sequence partitions between Ready and Unavailable',()=>{
+ const segments=[{key:'regular.1',boundaries:[{mode:'half'}],connections:[{id:'ready'},{id:'quota'},{id:'off',isActive:false}],waitingIds:['quota','off']},{key:'regular.2',boundaries:[{mode:'gap'}],connections:[{id:'hold'},{id:'unsupported'}],waitingIds:['hold'],unavailableIds:['unsupported']}];
+ const groups=availabilityQuotaSegments(segments,[],{},true,true,true);
+ assert.deepEqual(groups.map(g=>[g.availability,g.connections.map(c=>c.id)]),[['ready',['ready']],['waiting',['quota']],['waiting',['hold']],['unavailable',['off']],['unavailable',['unsupported']]]);
+ assert.equal(groups[2].boundaries[0].mode,'gap');
+ assert.deepEqual(availabilityQuotaSegments(segments,[],{},false,true,true),segments);
 });

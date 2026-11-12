@@ -85,3 +85,9 @@ test('three and four sorts preserve every row in the trace without sorting waiti
     assert.ok(stages.slice(stages.findIndex(stage => stage.id === 'waiting')).every(stage => stage.groups.filter(group => group.waiting).flatMap(group => group.ids).join() === 'a,c,e'));
   }
 });
+
+test('waiting display metadata includes recoverable quota and verification states only',async()=>{
+ const {rotationWaitingIds}=await import('../../src/sse/services/providerRotation.js');
+ const pool={waiting:[{connection:{id:'short'}}],blocked:['Quota exhausted','Cooling down','Image quota wait','Reset pending verification','Turned off','Model unavailable','Images paused'].map((reason,i)=>({connection:{id:String(i)},reason}))};
+ assert.deepEqual([...rotationWaitingIds(pool)],['short','0','1','2','3']);
+});

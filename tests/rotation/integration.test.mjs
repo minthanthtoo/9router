@@ -267,7 +267,7 @@ test('waiting preview and routing agree without advancing cursors, including emp
   const url = new URL('http://localhost/api/providers/client');
   for (const [key,value] of Object.entries({provider:'codex',includeImageAccounts:'true',rotationModel:'gpt-6.1',rotationPolicy:JSON.stringify(policy)})) url.searchParams.set(key,value);
   const cards = await (await clientRoute.GET(new Request(url))).json();
-  assert.ok(cards.rotationSegments.flatMap(segment=>segment.unavailableIds).includes(active[0].id));
+  assert.ok(cards.rotationSegments.flatMap(segment=>segment.waitingIds).includes(active[0].id));
   assert.equal(cards.connections.length, active.length);
   await write(true);
   // No sort evidence is also the legacy fallback path; zero must not re-enter it.
@@ -317,7 +317,7 @@ test('custom image account sequence remains independent of text and none preserv
  const cardURL=new URL('http://localhost/api/providers/client');
  for(const [key,value]of Object.entries({provider:'codex',includeImageAccounts:'true',rotationModel:'gpt-image-2.5',rotationPolicy:JSON.stringify(config)}))cardURL.searchParams.set(key,value);
  const cardResult=await clientRoute.GET(new Request(cardURL));assert.equal(cardResult.status,200);const cardData=await cardResult.json();
- assert.equal(cardData.rotationSegments.flatMap(segment=>segment.unavailableIds).length,4,JSON.stringify(cardData.rotationSegments));
+ assert.equal(cardData.rotationSegments.flatMap(segment=>segment.waitingIds).length,4,JSON.stringify(cardData.rotationSegments));
  assert.deepEqual(db.all('SELECT * FROM aurixImageRoutingCursors'),cursors);
 
  const {rotationAutomationStatus}=await import(new URL('src/shared/services/rotationSnapshotRefresh.js',root));
@@ -613,4 +613,34 @@ test('passive capacity survives reads but not plan or identity changes and store
   saved=(await repo.readRotationSnapshots([a]))[a.id];assert.equal(saved.capacitySamples,undefined);
   assert.equal((await repo.readRotationSnapshots([{...a,accessToken:'different'}]))[a.id],undefined);
  }finally{Date.now=original;}
+});
+
+test('live account selection advances through the saved sequence after a persisted 429',async()=>{
+ const previous=await getSettings();
+ const first=await createProviderConnection({provider:'codex',authType:'access_token',name:'429 first fixture',accessToken:'synthetic-429-first',isActive:true});
+ const second=await createProviderConnection({provider:'codex',authType:'access_token',name:'429 second fixture',accessToken:'synthetic-429-second',isActive:true});
+ const excluded=new Set(db.all('SELECT id FROM providerConnections').map(row=>row.id).filter(id=>id!==first.id&&id!==second.id));
+ const policy={...engine.emptyRotation(),enabled:true,sorts:[{key:'weekly-remaining',direction:'desc',division:'half'},{key:'session-reset',direction:'asc',division:'half'}]};
+ const options={capability:'chat',requestedModel:'premium-model',peekOnly:true,requestState:{}};
+ try{
+  await updateSettings({providerStrategies:{codex:{rotationSequence:policy}}});
+  for(const [account,left] of [[first,90],[second,50]]){
+   await repo.recordRotationUsage(account,{...usage(left),plan:'plus'});
+   await repo.recordRotationModels(account,[{id:'premium-model'}]);
+  }
+  const selected=await getProviderCredentials('codex',excluded,'premium-model',options);
+  assert.equal(selected.connectionId,first.id);
+  const {markAccountUnavailable}=await import(new URL('src/sse/services/auth.js',root));
+  const result=await markAccountUnavailable(first.id,429,'usage_limit_reached','codex','premium-model',Date.now()+3600000);
+  assert.equal(result.shouldFallback,true);
+  excluded.add(first.id);
+  const next=await getProviderCredentials('codex',excluded,'premium-model',options);
+  assert.equal(next.connectionId,second.id);
+  const failed=await getProviderConnectionById(first.id);
+  assert.equal(failed.errorCode,429);assert.ok(failed['modelLock_premium-model']);
+  assert.equal(outbound,0);
+ }finally{
+  await updateProviderConnection(first.id,{isActive:false});await updateProviderConnection(second.id,{isActive:false});
+  await updateSettings({providerStrategies:previous.providerStrategies});
+ }
 });

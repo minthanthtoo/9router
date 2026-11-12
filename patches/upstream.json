@@ -89,7 +89,7 @@
         "tests/rotation/card-segments.test.mjs",
         "tests/rotation/integration.test.mjs"
       ],
-      "notes": "Plan badges share the provider heading. Distinct section surfaces/availability edges lead; quieter metric and division descriptions retain quota-colored ranges and exact accessible text. Compact sticky headers share this hierarchy. Quota-page-only grid/action-icon sizing reduces competing visual weight. Main card list preserves recursive multi-sort partitions. Dotted separators use availability color and division-depth weight/indentation, with complete ranges/methods in hover/focus or click-pinned details. Specific inactive refill windows stay in Add sort; automatic refill time is the primary option."
+      "notes": "Plan badges share the provider heading. Distinct section surfaces/availability edges lead; quieter metric and division descriptions retain quota-colored ranges and exact accessible text. Compact sticky headers share this hierarchy. Quota-page-only grid/action-icon sizing reduces competing visual weight. Ready/Waiting/Unavailable classification retains recursive multi-sort partitions. Temporary quota/cooldown/verification waits are separate from disabled or unsupported accounts. Main card list preserves recursive multi-sort partitions. Dotted separators use availability color and division-depth weight/indentation, with complete ranges/methods in hover/focus or click-pinned details. Specific inactive refill windows stay in Add sort; automatic refill time is the primary option."
     },
     {
       "id": "codex-consented-reset",
