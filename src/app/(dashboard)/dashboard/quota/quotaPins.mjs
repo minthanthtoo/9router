@@ -10,10 +10,10 @@ export function toggleQuotaPin(pins,id) {
  return pins.includes(id)?pins.filter(value=>value!==id):[...pins,id];
 }
 
-// Keep sequence boundaries visible inside optional availability groups.
-export function availabilityQuotaSegments(segments, pins, quotaData, enabled, authoritative = false, preservePartitions = false) {
+// Compact display sections retain rank order; routing divisions remain in the policy preview.
+export function availabilityQuotaSegments(segments, pins, quotaData, enabled, authoritative = false) {
  const ordered = pinnedQuotaSegments(segments, pins, false);
- if (!enabled) return preservePartitions ? ordered : ordered.length ? [{key:'all',connections:ordered.flatMap(segment=>segment.connections),boundaries:[]}] : [];
+ if (!enabled) return ordered.length ? [{key:'all',connections:ordered.flatMap(segment=>segment.connections),boundaries:[]}] : [];
  const unavailable = new Set(segments.filter(segment=>['waiting','unavailable','disabled'].includes(segment.key)).flatMap(segment=>segment.connections.map(c=>c.id)));
  for (const segment of segments) for (const id of segment.unavailableIds || []) unavailable.add(id);
  const isUnavailable = connection => connection.isActive === false || unavailable.has(connection.id) || !authoritative && ['session','weekly'].some(window=>getConnectionQuotaRemaining(connection,quotaData,window)===0);
@@ -21,7 +21,6 @@ export function availabilityQuotaSegments(segments, pins, quotaData, enabled, au
   const key = blocked ? 'unavailable' : 'ready';
   const name = blocked ? 'Unavailable' : 'Ready';
   const partitions = ordered.map(segment=>({...segment,connections:segment.connections.filter(connection=>isUnavailable(connection)===blocked)})).filter(segment=>segment.connections.length);
-  if (!preservePartitions) return partitions.length ? [{key,rotationName:name,connections:partitions.flatMap(segment=>segment.connections),boundaries:[]}] : [];
-  return partitions.map((segment,index)=>({...segment,key:`${key}-${segment.key}`,rotationName:`${name} · ${segment.key.startsWith('reset') ? 'Expiring credit' : `Group ${index+1}`}`,availability:key}));
+  return partitions.length ? [{key,rotationName:name,availability:key,connections:partitions.flatMap(segment=>segment.connections),boundaries:[]}] : [];
  });
 }

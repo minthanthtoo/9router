@@ -140,10 +140,10 @@ test('availability grouping control works with zero, one and multiple sorts',asy
  assert.equal(button.disabled,false);assert.equal(button.getAttribute('aria-pressed'),'false');
  fireEvent.click(button);assert.equal(button.getAttribute('aria-pressed'),'true');
  fireEvent.click(button);assert.equal(button.getAttribute('aria-pressed'),'false');
- fireEvent.click(screen.getByRole('button',{name:'Short window reset: Off'}));
+ fireEvent.click(screen.getByRole('button',{name:'Reset time: Off'}));
  assert.equal(button.disabled,false);assert.equal(button.getAttribute('aria-pressed'),'false');
  fireEvent.click(button);assert.equal(button.getAttribute('aria-pressed'),'true');
- fireEvent.click(screen.getByRole('button',{name:'Weekly reset: Off'}));
+ fireEvent.change(screen.getByRole('combobox',{name:'Add sort'}),{target:{value:'weekly-reset'}});
  assert.equal(button.disabled,false);assert.equal(button.getAttribute('aria-pressed'),'true');
  assert.equal(screen.getByRole('group',{name:'Sort priority'}).querySelector('button'),button);
  fireEvent.click(button);assert.equal(button.getAttribute('aria-pressed'),'false');

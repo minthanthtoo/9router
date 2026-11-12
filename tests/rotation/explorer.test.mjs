@@ -28,7 +28,7 @@ test('equal-value and missing split notes remain distinct from actual count spli
  const missing=run(policy,{});assert.match(missing.stages[1].groups[0].note,/not reported/);assert.equal(missing.stages[3].groups.length,1);
 });
 test('all applicable windows stay visible regardless active sort; model families stay separate',()=>{
- const values=rotationMeasurements(snapshots['0'],'codex','gpt-6-sol',now);assert.equal(Object.keys(values).length,5);assert.equal(values['workload-capacity'],null);assert.equal(values['weekly-remaining'],70);
+ const values=rotationMeasurements(snapshots['0'],'codex','gpt-6-sol',now);assert.equal(Object.keys(values).length,6);assert.equal(values['workload-capacity'],null);assert.equal(values['weekly-remaining'],70);
  assert.match(quotaScopeSummary(snapshots['0'],'codex','gpt-6-sol',now),/shared/);
  const spark=rotationMeasurements(snapshots['0'],'codex','gpt-6-spark',now);assert.ok(Object.values(spark).every(v=>v===null));assert.match(quotaScopeSummary(snapshots['0'],'codex','gpt-6-spark',now),/not reported/);
 });

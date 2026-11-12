@@ -44,6 +44,7 @@ export function previewIsCurrent(preview, context, previewContext, now) {
 }
 export function rotationMetricLabel(metric, sessionLabel = 'Session') {
   if(metric.kind==='capacity')return 'Observed capacity';
+  if(metric.window==='auto')return 'Reset time · Auto';
   const label = metric.window === 'session' ? sessionLabel : metric.label.replace(/ (?:left %|reset)$/, '');
   return `${label} ${metric.kind === 'remaining' ? 'remaining' : 'reset'}`;
 }

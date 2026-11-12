@@ -41,9 +41,10 @@
         "tests/rotation/preview.test.mjs",
         "tests/rotation/waiting.test.mjs",
         "tests/rotation/integration.test.mjs",
-        "tests/rotation/mixed-plans.test.mjs"
+        "tests/rotation/mixed-plans.test.mjs",
+        "tests/rotation/auto-reset.test.mjs"
       ],
-      "notes": "Request-model eligibility and actual subscription windows precede selection. Reset credits order accounts within explicit quota groups without creating reset segments. Successful Codex account model discovery is cached as dated evidence; missing or stale discovery remains unknown."
+      "notes": "Request-model eligibility and actual subscription windows precede selection. Reset credits order accounts within explicit quota groups without creating reset segments. Successful Codex account model discovery is cached as dated evidence; missing or stale discovery remains unknown. Optional automatic reset-time metric uses the latest exhausted applicable constraint reset, otherwise the next known refill; missing recovery remains unknown. Old explicit-window policies are retained."
     },
     {
       "id": "image-quota-and-fallback",
@@ -88,7 +89,7 @@
         "tests/rotation/card-segments.test.mjs",
         "tests/rotation/integration.test.mjs"
       ],
-      "notes": "Plan badges share the provider heading. Distinct section surfaces/availability edges lead; quieter metric and division descriptions retain quota-colored ranges and exact accessible text. Compact sticky headers share this hierarchy. Quota-page-only grid/action-icon sizing reduces competing visual weight."
+      "notes": "Plan badges share the provider heading. Distinct section surfaces/availability edges lead; quieter metric and division descriptions retain quota-colored ranges and exact accessible text. Compact sticky headers share this hierarchy. Quota-page-only grid/action-icon sizing reduces competing visual weight. Main card list compacts rank partitions to Ready/Unavailable; full policy divisions remain in the rotation preview. Specific inactive refill windows stay in Add sort; automatic refill time is the primary option."
     },
     {
       "id": "codex-consented-reset",

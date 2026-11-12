@@ -21,11 +21,20 @@ const WINDOWS = {
   'codebuddy-intl': ['cycle'],
 };
 const LABELS = { session: 'Short window', weekly: 'Weekly', monthly: 'Monthly', daily: 'Daily', cycle: 'Plan period', rolling: 'Rolling', model: 'Model quota' };
+export const AUTO_RESET_METRIC = {key:'auto-reset',window:'auto',kind:'reset',label:'Reset time',icon:'hourglass_empty',asc:'Soonest first',desc:'Latest first'};
+export function automaticResetTime(quotas, now = Date.now()) {
+  const blocked = quotas.filter(quota => quota.remaining === 0);
+  const future = quota => Number.isFinite(quota.resetAt) && quota.resetAt > now;
+  // Every exhausted applicable constraint must recover; an unknown deadline cannot promise readiness.
+  if (blocked.length) return blocked.every(future) ? Math.max(...blocked.map(quota => quota.resetAt)) : null;
+  const times = quotas.filter(future).map(quota => quota.resetAt);
+  return times.length ? Math.min(...times) : null;
+}
 export function rotationMetrics(provider) {
-  return (WINDOWS[provider] || []).filter(window=>provider!=='codex'||window!=='monthly').flatMap(window => ['remaining', 'reset'].map(kind => ({
+  return (WINDOWS[provider] && provider !== 'ollama' ? [AUTO_RESET_METRIC] : []).concat((WINDOWS[provider] || []).filter(window=>provider!=='codex'||window!=='monthly').flatMap(window => ['remaining', 'reset'].map(kind => ({
     key: `${window}-${kind}`, window, kind, label: `${LABELS[window]} ${kind === 'remaining' ? 'left %' : 'reset'}`,
     icon: kind === 'remaining' ? 'percent' : 'hourglass_empty',
-  }))).filter(metric => !(provider === 'ollama' && metric.kind === 'reset')).concat(WINDOWS[provider] ? [{key:'workload-capacity',window:'workload',kind:'capacity',label:'Observed capacity',icon:'science',asc:'Lowest first',desc:'Highest first'}] : []);
+  }))).filter(metric => !(provider === 'ollama' && metric.kind === 'reset'))).concat(WINDOWS[provider] ? [{key:'workload-capacity',window:'workload',kind:'capacity',label:'Observed capacity',icon:'science',asc:'Lowest first',desc:'Highest first'}] : []);
 }
 export function emptyRotation() { return { version: ROTATION_VERSION, enabled: false, sorts: [], resetPriority: { enabled: false, days: 3, weeklyBelow: null } }; }
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -143,6 +152,7 @@ export function applicableRotationQuotas(snapshot, provider, model, now = Date.n
   return snapshot.quotas.filter(quota => scopeMatches(provider, quota.scope, model) && (quota.resetAt === null || quota.resetAt > now));
 }
 export function rotationValue(snapshot, metric, provider, model, now) {
+  if(metric.window==='auto')return automaticResetTime(applicableRotationQuotas(snapshot,provider,model,now),now);
   if(metric.kind==='capacity'){const estimate=estimateCapacity(snapshot,canonicalTextModel(provider,model),now,applicableRotationQuotas(snapshot,provider,model,now));return estimate.state==='observed'?estimate.low:null;}
   const values = applicableRotationQuotas(snapshot, provider, model, now).filter(quota => quota.window === metric.window).map(quota => metric.kind === 'remaining' ? quota.remaining : quota.resetAt).filter(value => value !== null);
   return values.length ? Math.min(...values) : null;

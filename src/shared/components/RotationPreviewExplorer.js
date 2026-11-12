@@ -41,7 +41,7 @@ export default function RotationPreviewExplorer({ preview, current, dirty, now, 
   const stage = stages.find(stage => stage.id === stageId) || stages.at(-1), stageIndex = stages.indexOf(stage);
   const ids = stage.groups.flatMap(group => group.ids), totalPages = Math.max(1, Math.ceil(ids.length / 10)), activePage = Math.min(page, totalPages);
   const pageIds = ids.slice((activePage - 1) * 10, activePage * 10), pageSet = new Set(pageIds);
-  const windows = [...new Set(metrics.filter(metric=>metric.kind!=='capacity').map(metric => metric.window))];
+  const windows = [...new Set(metrics.filter(metric=>metric.kind!=='capacity' && metric.window!=='auto').map(metric => metric.window))];
   const metricFor = (window, kind) => metrics.find(metric => metric.window === window && metric.kind === kind);
   const label = metric => rotationMetricLabel(metric, preview.sessionLabel);
   const activeKey = stage.type === 'sort' || stage.type === 'split' ? stage.rule.key : emphasizedKey;
@@ -117,7 +117,7 @@ export default function RotationPreviewExplorer({ preview, current, dirty, now, 
         {row.priority&&<time className={styles.credit} dateTime={new Date(row.expiry).toISOString()} title={exact(row.expiry)}>Credit expires in {remainingTime(row.expiry,now)}</time>}
         <div className={styles.windows}>{windows.map(window=>{const metric=metricFor(window,'remaining'),resetMetric=metricFor(window,'reset');return <div key={window} className={styles.window}><div className={activeKey===metric?.key?styles.activeMetric:''}><span>{label(metric)}</span><QuotaMeter value={row.measurements?.[metric.key]} label={label(metric)} missing={missing(row)} /></div>{resetMetric&&<div className={activeKey===resetMetric.key?styles.activeMetric:''}><ResetValue value={row.measurements?.[resetMetric.key]} now={now} missing={missing(row)} /></div>}</div>;})}</div>
         <div className={styles.evidence}><span>{row.waiting ? row.reason || 'Short window exhausted' : !row.observedAt ? 'No observation' : !row.fresh ? 'Old observation' : 'Saved observation'}</span>{row.observedAt&&<time dateTime={new Date(row.observedAt).toISOString()} title={exact(row.observedAt)}>{new Date(row.observedAt).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}</time>}</div>
-        <CapacityEvidence estimate={row.capacityEstimate}/>{why(row)}
+        {preview.sorts?.some(sort=>sort.key==='auto-reset')&&<div className={styles.evidence}><span>Reset time · Auto</span><ResetValue value={row.measurements?.['auto-reset']} now={now} missing={missing(row)}/></div>}<CapacityEvidence estimate={row.capacityEstimate}/>{why(row)}
       </article>})];
     })}</div>
     {!ids.length&&<p>No eligible accounts for this model.</p>}

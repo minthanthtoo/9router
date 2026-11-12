@@ -122,3 +122,21 @@ components within 1.5x. Otherwise the rule is skipped; existing sorts/fallback
 remain. This range is an empirical extrapolation, not a confidence interval,
 token budget or guarantee. External use and hidden provider accounting remain
 unobserved. It cannot clear quota waits, grant model access or redeem resets.
+
+## Automatic refill-time ordering and compact card sections
+
+`auto-reset` is an optional shared criterion, labelled Reset time with an Auto
+badge. It is unrelated to reset-credit spending. Within fresh requested-model
+allowance scope, exhausted constraints use their latest reset (all must recover);
+if any exhausted deadline is unknown the value is unknown. Otherwise the next
+known refill is used. Unknown values trail in both directions. Actual periods,
+including monthly plans, are retained without converting percentages into tokens.
+A timestamp is ordering evidence, never confirmation of recovery or permission
+to retry a held job. Existing admission, model access and reset consent remain.
+
+Saved explicit short/weekly sorts are not migrated or silently published. They
+remain active and editable; inactive explicit windows are in Add sort. The normal
+card list merges display partitions into Ready/Unavailable (or one flat list with
+availability grouping off). It preserves ranking within each section and keeps
+explicit routing divisions and their decision trace in the rotation preview.
+No DB migration or new dependency is required.

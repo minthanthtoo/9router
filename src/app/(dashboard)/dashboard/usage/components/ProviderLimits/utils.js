@@ -1,5 +1,5 @@
 import { capacityComparable } from '@/shared/utils/quotaCapacity.mjs';
-import { partitionRotationRows, compareResetPriority } from "@/shared/utils/rotationSequence.mjs";
+import { partitionRotationRows, compareResetPriority, AUTO_RESET_METRIC, normalizeRotationUsage, rotationValue } from "@/shared/utils/rotationSequence.mjs";
 import { getModelsByProviderId } from "open-sse/config/providerModels.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -18,6 +18,7 @@ export const ACCOUNT_FILTER_OPTIONS = [
   { value: "inactive", label: "Turned off" },
 ];
 export const QUOTA_SORT_OPTIONS = [
+  AUTO_RESET_METRIC,
   {key:"workload-capacity",label:"Observed capacity",icon:"science",window:"workload",kind:"capacity",asc:"Lowest first",desc:"Highest first"},
   { key: "session-reset", label: "Session reset", icon: "hourglass_empty", window: "session", kind: "reset", asc: "Earliest first", desc: "Latest first" },
   { key: "weekly-reset", label: "Weekly reset", icon: "hourglass_empty", window: "weekly", kind: "reset", asc: "Earliest first", desc: "Latest first" },
@@ -188,7 +189,7 @@ function groupByProviderStable(connections) {
   return Array.from(seen.values()).flat();
 }
 
-export function segmentVisibleConnections(connections, quotaData, sorts = [], now = Date.now()) {
+export function segmentVisibleConnections(connections, quotaData, sorts = [], now = Date.now(), model = '') {
   const rules = sorts.map(sort => ({ ...QUOTA_SORT_OPTIONS.find(option => option.key === sort.key), direction: sort.direction, division: sort.division || "half" }))
     .filter(rule => rule.key && ["asc", "desc"].includes(rule.direction));
   const comparable=capacityComparable(connections.map(connection=>connection.capacityEstimate));
@@ -201,6 +202,11 @@ export function segmentVisibleConnections(connections, quotaData, sorts = [], no
     values: rules.map(rule => {
       if(rule.kind==="capacity")return comparable&&connection.capacityEstimate?.state==='observed'?connection.capacityEstimate.low:null;
       if (rule.kind === "remaining") return getConnectionQuotaRemaining(connection, quotaData, rule.window);
+      if(rule.window === "auto") {
+        const data=quotaData[connection.id], usage=data?.raw || {quotas:Object.fromEntries((data?.quotas || []).map(quota=>[quota.quotaType || quota.modelKey || quota.name,quota]))};
+        const observedAt=new Date(usage.observedAt ?? data?.cachedAt ?? now).getTime();
+        return rotationValue(normalizeRotationUsage(connection.provider,usage,observedAt),rule,connection.provider,model,now);
+      }
       const resets = (quotaData[connection.id]?.quotas || [])
         .filter(quota => matchesQuotaWindow(quota, rule.window) && quota.resetAt)
         .map(quota => new Date(quota.resetAt).getTime())

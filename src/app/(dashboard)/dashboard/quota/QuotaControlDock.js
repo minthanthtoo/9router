@@ -49,7 +49,7 @@ export default function QuotaControlDock({children,sorts,onDockedChange,shortLab
    <span className="sr-only">{sorts.length||resetPriority?`${sorts.length+Number(resetPriority)} active sort steps`:'No active sorts'}</span>
    {resetPriority&&<span className="quota-dock-step" title="Matching Codex reset credits first"><span className="quota-dock-order">1</span><span aria-hidden="true" className="material-symbols-outlined">restart_alt</span><span aria-hidden="true" className="quota-dock-direction">↑</span></span>}
    {sorts.map((sort,index)=>{const option=options.find(item=>item.key===sort.key);return option&&<span key={`${sort.key}-${sort.direction}-${index}-${sort.division||'half'}`} className="quota-dock-step" title={`${index+1+Number(resetPriority)}. ${option.label}: ${directionLabel(option,sort)}`}>
-    <span className="quota-dock-order">{index+1+Number(resetPriority)}</span><span aria-hidden="true" className="material-symbols-outlined">{option.icon}</span><span className="quota-dock-window">{{weekly:'7d',monthly:'Month',daily:'Day',cycle:'Period',rolling:'Roll',model:'Model'}[option.window]||shortLabel}</span><span aria-hidden="true" className="quota-dock-direction">{sort.direction==='asc'?'↑':'↓'}</span>
+    <span className="quota-dock-order">{index+1+Number(resetPriority)}</span><span aria-hidden="true" className="material-symbols-outlined">{option.icon}</span><span className="quota-dock-window">{{auto:'Auto',weekly:'7d',monthly:'Month',daily:'Day',cycle:'Period',rolling:'Roll',model:'Model'}[option.window]||shortLabel}</span><span aria-hidden="true" className="quota-dock-direction">{sort.direction==='asc'?'↑':'↓'}</span>
    </span>;})}
   </button>}
  </div>;
