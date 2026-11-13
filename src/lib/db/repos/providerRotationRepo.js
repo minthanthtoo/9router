@@ -1,7 +1,7 @@
 import { accountContext, collectCapacitySamples } from '../../../shared/utils/quotaCapacity.mjs';
 import { createHash } from 'node:crypto';
 import { getAdapter } from '../driver.js';
-import { emptyRotation, normalizeRotationUsage, validateRotation, SNAPSHOT_MAX_AGE_MS, scopeMatches } from '../../../shared/utils/rotationSequence.mjs';
+import { emptyRotation, normalizeRotationUsage, validateRotation, SNAPSHOT_MAX_AGE_MS, scopeMatches, applicableRotationQuotas } from '../../../shared/utils/rotationSequence.mjs';
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const fingerprint = connection => hash([connection.provider, connection.accessToken, connection.apiKey, connection.projectId, connection.providerSpecificData?.accountId, connection.providerSpecificData?.workspaceId, connection.providerSpecificData?.chatgptAccountId, connection.providerSpecificData?.verifiedQuotaIdentity, connection.providerSpecificData?.imageQuotaIdentityGeneration]);
 function identityStillCurrent(db, connection) {
@@ -143,7 +143,16 @@ export async function finishCreditReset(id, state, code) {
 
 export async function readCreditResetHolds(connections) {
   const db = await getAdapter(), ids = new Set(connections.map(c => c.id));
-  return db.all("SELECT id,connectionId,state,createdAt FROM providerCreditResetAttempts WHERE state IN ('pending','unknown','confirmed')").filter(row => ids.has(row.connectionId));
+  const holds = db.all("SELECT id,connectionId,state,createdAt FROM providerCreditResetAttempts WHERE state IN ('pending','unknown','confirmed')").filter(row => ids.has(row.connectionId));
+  const snapshots = holds.some(row => row.state === 'confirmed') ? await readRotationSnapshots(connections) : {};
+  return holds.filter(row => {
+    const snapshot = snapshots[row.connectionId];
+    const quotas = applicableRotationQuotas(snapshot, 'codex', '', Date.now());
+    // A later identity-checked provider read can verify a confirmed reset without another text request.
+    if (row.state !== 'confirmed' || !(snapshot?.usageReadStartedAt > row.createdAt) || !quotas.some(quota => quota.window === 'session' && quota.remaining > 0) || !quotas.every(quota => Number.isFinite(quota.remaining) && quota.remaining > 0)) return true;
+    db.run("UPDATE providerCreditResetAttempts SET state='recovered' WHERE id=? AND state='confirmed'", [row.id]);
+    return false;
+  });
 }
 export async function completeCreditResetRecovery(id) {
   const db = await getAdapter();

@@ -93,6 +93,7 @@
     },
     {
       "id": "codex-consented-reset",
+      "notes": "Confirmed reset holds recover from later fresh identity-matched positive subscription usage reads in the shared repository path; pending and uncertain attempts remain fenced.",
       "status": "committed-dependent-feature",
       "depends_on": [
         "account-rotation"

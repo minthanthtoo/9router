@@ -644,3 +644,42 @@ test('live account selection advances through the saved sequence after a persist
   await updateSettings({providerStrategies:previous.providerStrategies});
  }
 });
+
+test('confirmed reset holds recover from a later verified usage read without a text request', async () => {
+  const connection = await createProviderConnection({provider:'codex',authType:'access_token',name:'Reset recovery fixture',accessToken:'synthetic-reset-recovery',isActive:true});
+  const attempt = await repo.claimCreditReset(connection.id);
+  await repo.finishCreditReset(attempt, 'confirmed', 'reset');
+  db.run('UPDATE providerCreditResetAttempts SET createdAt=? WHERE id=?', [Date.now()-1000, attempt]);
+  await repo.recordRotationUsage(connection, usage(80));
+  const holds = await repo.readCreditResetHolds([connection]);
+  assert.deepEqual(holds, []);
+  const pool = rotationPool([connection], await repo.readRotationSnapshots([connection]), config, {provider:'codex',model:'gpt-6-sol',resetHolds:holds});
+  assert.deepEqual(pool.ranked.map(row=>row.connection.id),[connection.id]);
+  assert.equal(pool.blocked.length,0);
+  assert.equal(db.get('SELECT state FROM providerCreditResetAttempts WHERE id=?', [attempt]).state, 'recovered');
+  assert.equal(db.all('SELECT id FROM providerCreditResetAttempts WHERE connectionId=?',[connection.id]).length,1);
+});
+
+test('reset recovery preserves uncertain, stale, pre-reset, exhausted and wrong-identity holds', async () => {
+  const connection = await createProviderConnection({provider:'codex',authType:'access_token',name:'Reset guard fixture',accessToken:'synthetic-reset-guard',isActive:true});
+  const attempt = await repo.claimCreditReset(connection.id);
+  const createdAt = Date.now()-1000;
+  db.run('UPDATE providerCreditResetAttempts SET createdAt=?,state=? WHERE id=?',[createdAt,'confirmed',attempt]);
+  await repo.recordRotationUsage(connection, usage(80));
+  const saved = db.get('SELECT data FROM providerRotationSnapshots WHERE connectionId=?',[connection.id]).data;
+  const snapshot = JSON.parse(saved);
+  for (const [state,data,row] of [
+    ['pending',snapshot,connection],
+    ['unknown',snapshot,connection],
+    ['confirmed',{...snapshot,usageReadStartedAt:createdAt},connection],
+    ['confirmed',{...snapshot,observedAt:Date.now()-engine.SNAPSHOT_MAX_AGE_MS-1000},connection],
+    ['confirmed',{...snapshot,quotas:snapshot.quotas.map(quota=>({...quota,remaining:0}))},connection],
+    ['confirmed',{...snapshot,quotas:snapshot.quotas.map(quota=>({...quota,remaining:null}))},connection],
+    ['confirmed',snapshot,{...connection,accessToken:'different-identity'}],
+  ]) {
+    db.run('UPDATE providerCreditResetAttempts SET state=? WHERE id=?',[state,attempt]);
+    db.run('UPDATE providerRotationSnapshots SET data=? WHERE connectionId=?',[JSON.stringify(data),connection.id]);
+    assert.equal((await repo.readCreditResetHolds([row])).length,1);
+    assert.equal(db.get('SELECT state FROM providerCreditResetAttempts WHERE id=?',[attempt]).state,state);
+  }
+});

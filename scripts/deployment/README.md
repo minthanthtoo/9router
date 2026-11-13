@@ -1,7 +1,10 @@
 # Automatic deployment
 
-Push to `master` → regression tests → Docker build → isolated health check.
-Release through **Run workflow**, selecting `master` and enabling **deploy**.
+Push to `master` → regression tests → Docker build → isolated health check → deploy
+when repository variable `AUTO_DEPLOY=true`. The production branch is the release
+boundary: local commits and feature-branch pushes do not deploy.
+For a deliberate release while auto-deploy is paused, use **Run workflow**,
+selecting `master` and enabling **deploy**.
 Local commits do not trigger GitHub Actions. Pull requests and master pushes run
 checks. Feature-branch pushes are checked through their pull request.
 Pull requests run checks without server access. This workflow is limited to
@@ -24,8 +27,8 @@ Pull requests run checks without server access. This workflow is limited to
 4. In the GitHub `production` environment set secrets `DEPLOY_SSH_KEY` and
    `DEPLOY_KNOWN_HOSTS` using the verified host key. Set `DEPLOY_HOST` to the host.
    Restrict the environment to `master`. No manual reviewer is needed for auto-deploy.
-5. Keep repository variable `AUTO_DEPLOY=false` for deliberate releases.
-   Setting it to `true` opts back into deployment on each master push.
+5. Set repository variable `AUTO_DEPLOY=true` for checked master-push deployments.
+   Set it to `false` to pause automatic releases while retaining checks and manual deployment.
 
 ## Preserved state and recovery
 
