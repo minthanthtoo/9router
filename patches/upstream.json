@@ -173,7 +173,7 @@
       "tests": [
         "tests/rotation/capacity.test.mjs",
         "tests/rotation/integration.test.mjs",
-        "tests/unit/capacity-completion.test.js"
+        "tests/rotation/capacity-completion.test.mjs"
       ],
       "notes": "Passive empirical similar-request range; no fixed plan token budgets or additional provider calls. Known estimates require comparable requested settings and recorded request sizes. Admission, quota holds and reset consent remain authoritative."
     }

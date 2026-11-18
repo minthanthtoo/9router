@@ -44,8 +44,6 @@ jobs:
       - run: npm ci --prefix tests
       - name: Rotation and image workflow regressions
         run: npm --prefix tests run test:rotation
-      - name: Capacity regression
-        run: npm --prefix tests test -- unit/capacity-completion.test.js
       - name: Deployment safety tests
         run: python3 -m unittest discover -s scripts/deployment -p 'test_*.py'
       - uses: docker/setup-buildx-action@v3
