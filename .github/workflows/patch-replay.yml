@@ -1,10 +1,10 @@
 name: Patch reproducibility
 
 on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
+  workflow_call:
+    outputs:
+      upstream-base:
+        value: ${{ jobs.replay.outputs.upstream-base }}
 
 permissions:
   contents: read
@@ -14,6 +14,8 @@ jobs:
     if: github.repository == 'minthanthtoo/9router'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    outputs:
+      upstream-base: ${{ steps.base.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,5 +24,13 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Test patch tooling and feature catalogue
         run: python3 -B -m unittest discover -s scripts/patches -p 'test_*.py'
+      - name: Check the pinned official tag
+        id: base
+        run: |
+          set -euo pipefail
+          read -r version base < <(python3 -c 'import json,re; c=json.load(open("patches/upstream.json")); assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", c["version"]) and re.fullmatch(r"[0-9a-f]{40}", c["base"]); print(c["version"], c["base"])')
+          git fetch --no-tags https://github.com/decolua/9router.git "refs/tags/v$version"
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$base"
+          printf 'sha=%s\n' "$base" >> "$GITHUB_OUTPUT"
       - name: Replay committed changes from official base
         run: python3 -B scripts/patches/export.py --verify --output "$RUNNER_TEMP/9router-patches"

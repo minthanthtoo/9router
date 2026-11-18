@@ -37,6 +37,12 @@ and records feature dependencies and regression entry points.
    existing full CI/build and safe deployment gates. Never spend credits or make
    provider requests merely to prove that a patch applies.
 
+The fork's production build depends on patch replay. CI checks that the official
+tag resolves to the recorded base, validates the feature catalogue and replays the
+committed series. The deployment receipt identifies that official base, fork
+revision and Docker image. A replay pass proves reproducibility at the pinned
+base. Use the upgrade procedure below to evaluate a newer official version.
+
 ## Export a reproducible patch set
 
 From the repository root, choose a **new** output directory outside the repo:

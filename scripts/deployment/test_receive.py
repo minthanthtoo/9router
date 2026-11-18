@@ -1,7 +1,9 @@
 from contextlib import closing
 import copy
+import hashlib
 from pathlib import Path
 import sqlite3
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -14,6 +16,18 @@ class DeploymentSafety(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 receive.validate_revision(value)
         self.assertEqual(receive.validate_revision('a' * 40), 'a' * 40)
+
+    def test_release_command_requires_the_exact_receiver_and_positive_image_size(self):
+        revision = 'a' * 40
+        image = 'sha256:' + 'b' * 64
+        base = 'c' * 40
+        checksum = hashlib.sha256(Path(receive.__file__).read_bytes()).hexdigest()
+        self.assertEqual(receive.release_command(f'{revision} {image} 42 {base} {checksum}'),
+                         (revision, image, 42, base))
+        with self.assertRaisesRegex(RuntimeError, 'exact checked receiver'):
+            receive.release_command(f'{revision} {image} 42 {base} ' + 'd' * 64)
+        with self.assertRaises(ValueError):
+            receive.release_command(f'{revision} {image} 0 {base} {checksum}')
 
     def test_configuration_keeps_runtime_and_isolates_rehearsal(self):
         old = {'Config': {'Env': ['TOKEN=private', 'IMAGE_ADMIN_TEST_WORKER_ENABLED=true'], 'Cmd': ['node', 'custom-server.js']},
@@ -104,36 +118,135 @@ class DeploymentSafety(unittest.TestCase):
                     db.execute('create table settings(id integer)')
                     db.execute('insert into settings values(7)')
                 sha = 'a' * 40
-                old = {'Image': 'old', 'Config': {'Entrypoint': ['/entrypoint.sh'], 'Cmd': ['node'], 'Env': []},
+                old = {'Id': 'old-container', 'Image': 'old', 'Config': {'Entrypoint': ['/entrypoint.sh'], 'Cmd': ['node'], 'Env': []},
                        'HostConfig': {'Binds': [str(data) + ':/app/data'], 'RestartPolicy': {'Name': 'unless-stopped'}},
                        'Mounts': [{'Type': 'bind', 'Source': str(data), 'Destination': '/app/data', 'RW': True}],
                        'NetworkSettings': {'Networks': {receive.NETWORK: {}}}}
-                image = {'Id': 'new', 'Config': {**old['Config'], 'Labels': {
+                image_id = 'sha256:' + 'b' * 64
+                image = {'Id': image_id, 'Config': {**old['Config'], 'Labels': {
                     'org.opencontainers.image.revision': sha,
                     'org.opencontainers.image.source': 'https://github.com/' + receive.REPOSITORY}}}
                 calls = []
+                loaded = False
                 def fake_docker(method, path, body=None, missing_ok=False):
                     calls.append((method, path))
                     if method == 'GET':
-                        return image if path.startswith('/images/') else old
+                        if path.startswith('/images/'):
+                            return image if loaded else None
+                        if path == '/info':
+                            return {'DockerRootDir': str(root)}
+                        if path == '/containers/json?all=1':
+                            return []
+                        return old
                     if after_attachment and path == '/networks/' + receive.NETWORK + '/connect':
                         raise RuntimeError('acknowledgement lost')
                     return {}
                 class Input:
                     buffer = None
+                def load(*args, **kwargs):
+                    nonlocal loaded
+                    loaded = True
+                    return type('Result', (), {'returncode': 0})()
                 with patch.object(receive, 'ROOT', root), patch.object(receive, 'DATA', data), patch.object(receive, 'STATE', state), \
                      patch.object(receive, 'current_head', return_value=sha), patch.object(receive, 'docker', side_effect=fake_docker), \
                      patch.object(receive, 'healthy', side_effect=None if after_attachment else [None, RuntimeError('unhealthy')]), \
                      patch.object(receive.shutil, 'disk_usage', return_value=type('Disk', (), {'free': 4 * 1024 ** 3})()), \
-                     patch.object(receive.subprocess, 'run', return_value=type('Result', (), {'returncode': 0})()), patch.object(receive.sys, 'stdin', Input()):
+                     patch.object(receive.subprocess, 'run', side_effect=load), patch.object(receive.sys, 'stdin', Input()):
                     with self.assertRaises(RuntimeError):
-                        receive.deploy(sha)
+                        receive.deploy(sha, image_id)
                 self.assertIn(('POST', '/containers/9router-before-' + sha[:12] + '/update'), calls)
                 self.assertEqual(('POST', '/containers/9router/update') in calls, not after_attachment)
                 self.assertEqual((state / 'pending.json').exists(), after_attachment)
+                self.assertEqual((state / 'import.json').exists(), after_attachment)
                 self.assertEqual(('DELETE', '/containers/9router?force=true') in calls, not after_attachment)
+                self.assertEqual(('DELETE', '/images/9router-ci:' + sha + '?force=false') in calls, not after_attachment)
                 with closing(sqlite3.connect(data / receive.DB)) as db, db:
                     self.assertEqual(db.execute('select id from settings').fetchone()[0], 7)
+
+    def test_storage_guards_block_before_docker_load(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data = Path(directory) / 'data'
+            state = Path(directory) / 'ci'
+            data.mkdir()
+            state.mkdir()
+            (data / 'payload').write_bytes(b'synthetic')
+            sha = 'a' * 40
+            with patch.object(receive, 'DATA', data), patch.object(receive, 'STATE', state), \
+                 patch.object(receive, 'current_head', return_value=sha), patch.object(receive, 'docker') as docker, \
+                 patch.object(receive.subprocess, 'run') as run:
+                docker.side_effect = [None, [], {'DockerRootDir': directory}]
+                with patch.object(receive, 'BACKUP_BUDGET', 1), self.assertRaisesRegex(RuntimeError, 'backup budget'):
+                    receive.deploy(sha, 'image', 1)
+                docker.side_effect = [None, [], {'DockerRootDir': directory}]
+                disk = type('Disk', (), {'free': receive.RESERVE + 100})()
+                with patch.object(receive.shutil, 'disk_usage', return_value=disk), self.assertRaisesRegex(RuntimeError, '3 GiB reserve'):
+                    receive.deploy(sha, 'image', 100)
+                run.assert_not_called()
+
+    def test_rollback_plan_joins_legacy_receipts_and_current_container_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            refs = [str(i) * 40 for i in range(8)]
+            containers, images = {}, {}
+            for i, sha in enumerate(refs):
+                image_id = f'image-{i}'
+                images[image_id] = {'Id': image_id, 'Config': {'Labels': {
+                    receive.SOURCE_LABEL: receive.SOURCE, receive.REVISION_LABEL: sha}}}
+                previous = '9router-before-' + sha[:12]
+                release = state / (sha + '-' + str(i))
+                release.mkdir()
+                result = {'commit': sha, 'image': image_id, 'previous': previous, 'status': 'deployed'}
+                if not i:
+                    continue
+                if i == 6:
+                    result.update(previousContainer='container-6', previousImage='image-5')
+                if i == 7:
+                    result.update(previousContainer='different', previousImage='image-6')
+                containers[f'container-{i}'] = {
+                    'Id': f'container-{i}', 'Name': '/' + previous, 'Image': f'image-{i-1}',
+                    'State': {'Status': 'exited'}, 'HostConfig': {'RestartPolicy': {'Name': 'no'}}}
+                receive.receipt(release / 'result.json', result)
+            first = state / (refs[0] + '-0')
+            receive.receipt(first / 'result.json', {'commit': refs[0], 'image': 'image-0',
+                            'previous': '9router-before-' + refs[0][:12], 'status': 'deployed'})
+
+            def docker(method, path, missing_ok=False):
+                if path == '/containers/json?all=1':
+                    return [{'Names': [c['Name']], 'Id': c['Id']} for c in containers.values()]
+                if path.startswith('/containers/'):
+                    return containers[path.split('/')[2]]
+                return images[path.split('/')[2]]
+
+            with patch.object(receive, 'STATE', state), patch.object(receive, 'docker', side_effect=docker):
+                keep, retire, unknown = receive.rollback_plan()
+                self.assertEqual([c[1] for c in keep], [f'container-{i}' for i in range(6, 1, -1)])
+                self.assertEqual([c[1] for c in retire], ['container-1'])
+                self.assertEqual(unknown, ['9router-before-' + refs[7][:12]])
+
+    def test_docker_api_uses_the_daemons_supported_minimum(self):
+        for minimum, expected in [('1.24', '/v1.41'), ('1.44', '/v1.44')]:
+            with self.subTest(minimum=minimum), patch.object(receive, 'docker_request',
+                                                             return_value={'MinAPIVersion': minimum, 'ApiVersion': '1.53'}):
+                receive.docker_api.cache_clear()
+                self.assertEqual(receive.docker_api(), expected)
+        receive.docker_api.cache_clear()
+
+    def test_archive_rejects_missing_files_before_removing_the_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory)
+            backup = release / 'backup'
+            backup.mkdir()
+            (backup / 'one').write_bytes(b'one')
+            (backup / 'two').write_bytes(b'two')
+            archive = release / 'backup.tar.gz'
+            with tarfile.open(archive, 'w:gz') as stream:
+                stream.add(backup, arcname='backup', recursive=False)
+                stream.add(backup / 'one', arcname='backup/one')
+            with patch.object(receive.subprocess, 'run') as compare:
+                with self.assertRaisesRegex(RuntimeError, 'incomplete'):
+                    receive.compare_archive(archive, release, ['tar'])
+                compare.assert_not_called()
+            self.assertEqual((backup / 'two').read_bytes(), b'two')
 
     def test_backup_uses_sqlite_backup_and_rejects_symlinks(self):
         with tempfile.TemporaryDirectory() as directory:

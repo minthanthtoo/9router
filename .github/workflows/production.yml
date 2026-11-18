@@ -15,8 +15,16 @@ on:
 permissions:
   contents: read
 
+env:
+  RELEASE_REQUESTED: ${{ github.ref == 'refs/heads/master' && ((github.event_name == 'workflow_dispatch' && inputs.deploy == true) || (github.event_name == 'push' && vars.AUTO_DEPLOY == 'true')) }}
+
 jobs:
+  patch-replay:
+    if: github.repository == 'minthanthtoo/9router'
+    uses: ./.github/workflows/patch-replay.yml
+
   check-build:
+    needs: patch-replay
     concurrency:
       group: checks-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
@@ -36,6 +44,8 @@ jobs:
       - run: npm ci --prefix tests
       - name: Rotation and image workflow regressions
         run: npm --prefix tests run test:rotation
+      - name: Capacity regression
+        run: npm --prefix tests test -- unit/capacity-completion.test.js
       - name: Deployment safety tests
         run: python3 -m unittest discover -s scripts/deployment -p 'test_*.py'
       - uses: docker/setup-buildx-action@v3
@@ -51,6 +61,7 @@ jobs:
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            io.9router.upstream.revision=${{ needs.patch-replay.outputs.upstream-base }}
           cache-from: type=gha,scope=production
           cache-to: type=gha,mode=max,scope=production
       - name: Check isolated image health
@@ -67,14 +78,29 @@ jobs:
             sleep 2
           done
           exit 1
+      - name: Rehearse two Docker cutovers and retention
+        env:
+          UPSTREAM_BASE: ${{ needs.patch-replay.outputs.upstream-base }}
+        run: sudo python3 -B scripts/deployment/rehearse.py "9router-ci:$GITHUB_SHA" "$UPSTREAM_BASE"
       - name: Export checked image
-        if: github.event_name != 'pull_request'
-        run: docker save 9router-ci:"$GITHUB_SHA" | gzip -1 > "$RUNNER_TEMP/image.tar.gz"
+        if: env.RELEASE_REQUESTED == 'true'
+        env:
+          UPSTREAM_BASE: ${{ needs.patch-replay.outputs.upstream-base }}
+        run: |
+          set -euo pipefail
+          tag="9router-ci:$GITHUB_SHA"
+          mkdir "$RUNNER_TEMP/release"
+          cd "$RUNNER_TEMP/release"
+          docker save "$tag" | gzip -1 > image.tar.gz
+          sha256sum image.tar.gz > image.sha256
+          read -r image_id image_bytes < <(docker image inspect --format '{{.Id}} {{.Size}}' "$tag")
+          read -r receiver_hash _ < <(sha256sum "$GITHUB_WORKSPACE/scripts/deployment/receive.py")
+          printf '%s %s %s %s\n' "$image_id" "$image_bytes" "$UPSTREAM_BASE" "$receiver_hash" > release.txt
       - uses: actions/upload-artifact@v4
-        if: github.event_name != 'pull_request'
+        if: env.RELEASE_REQUESTED == 'true'
         with:
           name: production-image
-          path: ${{ runner.temp }}/image.tar.gz
+          path: ${{ runner.temp }}/release/
           compression-level: 0
           retention-days: 3
 
@@ -105,6 +131,9 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$DEPLOY_KEY" && test -n "$KNOWN_HOSTS" && test -n "$DEPLOY_HOST"
+          cd "$RUNNER_TEMP/release"
+          sha256sum --check image.sha256
+          read -r image_id image_bytes upstream_base receiver_hash < release.txt
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
@@ -112,4 +141,4 @@ jobs:
           trap 'rm -f ~/.ssh/deploy' EXIT
           ssh -T -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes \
             -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 \
-            "root@$DEPLOY_HOST" "$GITHUB_SHA" < "$RUNNER_TEMP/release/image.tar.gz"
+            "root@$DEPLOY_HOST" "$GITHUB_SHA $image_id $image_bytes $upstream_base $receiver_hash" < image.tar.gz

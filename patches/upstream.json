@@ -112,9 +112,11 @@
       "id": "fork-deployment",
       "status": "fork-only",
       "depends_on": [],
+      "notes": "Production builds require the official tag and verified patch replay. Retain five verified Docker rollbacks, budget local deployment state, and verify retired snapshot archives.",
       "entrypoints": [
         ".github/workflows/production.yml",
-        "scripts/deployment/receive.py"
+        "scripts/deployment/receive.py",
+        "scripts/deployment/rehearse.py"
       ],
       "tests": [
         "scripts/deployment/test_receive.py"
