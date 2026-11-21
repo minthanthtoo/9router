@@ -84,13 +84,47 @@ def validate_revision(value):
 
 
 def release_command(value):
-    match = re.fullmatch(r'([0-9a-f]{40}) (sha256:[0-9a-f]{64}) ([1-9][0-9]{0,11}) ([0-9a-f]{40}) ([0-9a-f]{64})', value)
+    match = re.fullmatch(r'([0-9a-f]{40}) ([1-9][0-9]{0,11}) ([0-9a-f]{40}) ([0-9a-f]{64}) ([0-9a-f]{64})', value)
     if not match:
-        raise ValueError('Expected revision, image ID, image bytes, official base and receiver checksum')
-    sha, image_id, size, base, receiver = match.groups()
+        raise ValueError('Expected revision, image bytes, official base, receiver checksum and archive checksum')
+    sha, size, base, receiver, archive = match.groups()
     if hashlib.sha256(Path(__file__).read_bytes()).hexdigest() != receiver:
         raise RuntimeError('Install the exact checked receiver before release')
-    return sha, image_id, int(size), base
+    return sha, int(size), base, archive
+
+
+def load_checked_image(expected_sha256):
+    if not re.fullmatch(r'[0-9a-f]{64}', expected_sha256 or ''):
+        raise ValueError('Expected a SHA-256 image archive checksum')
+    digest = hashlib.sha256()
+    process = subprocess.Popen(['docker', 'load', '--quiet'], stdin=subprocess.PIPE,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    broken_pipe = False
+    try:
+        while True:
+            block = sys.stdin.buffer.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+            if not broken_pipe:
+                try:
+                    process.stdin.write(block)
+                except BrokenPipeError:
+                    broken_pipe = True
+        try:
+            process.stdin.close()
+        except BrokenPipeError:
+            broken_pipe = True
+        result = process.wait()
+    except BaseException:
+        if process.poll() is None:
+            process.terminate()
+            process.wait()
+        raise
+    if broken_pipe or result:
+        raise RuntimeError('Docker image import failed')
+    if digest.hexdigest() != expected_sha256:
+        raise RuntimeError('Image archive checksum mismatch')
 
 
 def current_head():
@@ -294,14 +328,17 @@ def settle_import():
         return
     record = json.loads(marker.read_text())
     sha = validate_revision(record['commit'])
-    image_id = record['image']
-    if not re.fullmatch(r'sha256:[0-9a-f]{64}', image_id):
-        raise RuntimeError('Interrupted Docker import requires review')
     tag = docker('GET', '/images/9router-ci:' + sha + '/json', missing_ok=True)
-    if tag and (tag.get('Id') != image_id or image_revision(tag) != sha):
-        raise RuntimeError('Interrupted Docker import differs from its receipt')
+    if tag:
+        labels = (tag.get('Config') or {}).get('Labels') or {}
+        if (record.get('archiveVerified') is not True and tag.get('Id') != record.get('image')):
+            raise RuntimeError('Interrupted Docker import differs from its receipt')
+        if (image_revision(tag) != sha or
+                (record.get('base') and labels.get(BASE_LABEL) != record['base'])):
+            raise RuntimeError('Interrupted Docker import provenance requires review')
     referenced = {c['ImageID'] for c in docker('GET', '/containers/json?all=1')}
-    remove_image(sha, image_id, referenced)
+    if tag:
+        remove_image(sha, tag['Id'], referenced)
     marker.unlink()
     sync_directory(STATE)
 
@@ -413,15 +450,18 @@ def archive_retired(destination):
         print('Archived verified backup: ' + archive.name)
 
 
-def deploy(sha, image_id=None, image_size=0, base=None):
+def deploy(sha, image_size=0, base=None, archive_sha256=None):
     if (STATE / 'pending.json').exists():
         raise RuntimeError('Previous cutover requires review; current data preserved')
     if current_head() != sha:
         raise RuntimeError('Commit is no longer production branch head; skip stale deployment')
+    if not re.fullmatch(r'[0-9a-f]{64}', archive_sha256 or ''):
+        raise ValueError('Expected a SHA-256 image archive checksum')
     settle_import()
     prior = docker('GET', '/images/9router-ci:' + sha + '/json', missing_ok=True)
-    if prior and prior['Id'] != image_id:
-        raise RuntimeError('The checked release tag already refers to a different image')
+    if prior and (image_revision(prior) != sha or
+                  (prior.get('Config') or {}).get('Labels', {}).get(BASE_LABEL) != base):
+        raise RuntimeError('The checked release tag has different provenance')
     remove_unmounted_rehearsals()
     data_size = check_snapshots()
     docker_root = Path(docker('GET', '/info')['DockerRootDir'])
@@ -434,11 +474,15 @@ def deploy(sha, image_id=None, image_size=0, base=None):
     require_space(docker_root, extra)
     marker = STATE / 'import.json'
     if not prior:
-        receipt(marker, {'commit': sha, 'image': image_id})
+        receipt(marker, {'commit': sha, 'base': base, 'archiveSha256': archive_sha256,
+                         'archiveVerified': False})
     try:
-        if subprocess.run(['docker', 'load', '--quiet'], stdin=sys.stdin.buffer, stdout=subprocess.DEVNULL).returncode:
-            raise RuntimeError('Image transfer/load failed')
-        deploy_loaded(sha, image_id, base)
+        if not prior:
+            load_checked_image(archive_sha256)
+            imported = docker('GET', '/images/9router-ci:' + sha + '/json', missing_ok=True)
+            receipt(marker, {'commit': sha, 'base': base, 'archiveSha256': archive_sha256,
+                             'archiveVerified': True, 'image': imported.get('Id') if imported else None})
+        deploy_loaded(sha, base)
     except Exception:
         if not prior and not (STATE / 'pending.json').exists():
             try:
@@ -451,10 +495,10 @@ def deploy(sha, image_id=None, image_size=0, base=None):
     retention()
 
 
-def deploy_loaded(sha, image_id, base):
+def deploy_loaded(sha, base):
     image = docker('GET', '/images/9router-ci:' + sha + '/json')
-    if (image_revision(image) != sha or image['Id'] != image_id
-            or image['Config']['Labels'].get(BASE_LABEL) != base):
+    if (image_revision(image) != sha or
+            image['Config']['Labels'].get(BASE_LABEL) != base):
         raise RuntimeError('Image provenance differs from checked commit')
     old = docker('GET', '/containers/' + NAME + '/json')
     if old['Image'] == image['Id']:

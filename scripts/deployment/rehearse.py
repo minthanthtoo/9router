@@ -73,7 +73,7 @@ def rehearse(tag, base):
                 for i in (6, 7):
                     sha = revisions[i]
                     with patch.object(receive, 'current_head', return_value=sha):
-                        receive.deploy_loaded(sha, images[i], base)
+                        receive.deploy_loaded(sha, base)
                     receive.retention()
                     keep, retire, unknown = receive.rollback_plan()
                     check(len(keep) == 5 and not retire and not unknown, 'Rollback limit failed')

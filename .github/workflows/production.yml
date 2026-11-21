@@ -91,9 +91,10 @@ jobs:
           cd "$RUNNER_TEMP/release"
           docker save "$tag" | gzip -1 > image.tar.gz
           sha256sum image.tar.gz > image.sha256
-          read -r image_id image_bytes < <(docker image inspect --format '{{.Id}} {{.Size}}' "$tag")
+          read -r image_bytes < <(docker image inspect --format '{{.Size}}' "$tag")
           read -r receiver_hash _ < <(sha256sum "$GITHUB_WORKSPACE/scripts/deployment/receive.py")
-          printf '%s %s %s %s\n' "$image_id" "$image_bytes" "$UPSTREAM_BASE" "$receiver_hash" > release.txt
+          read -r archive_hash _ < image.sha256
+          printf '%s %s %s %s\n' "$image_bytes" "$UPSTREAM_BASE" "$receiver_hash" "$archive_hash" > release.txt
       - uses: actions/upload-artifact@v4
         if: env.RELEASE_REQUESTED == 'true'
         with:
@@ -131,7 +132,7 @@ jobs:
           test -n "$DEPLOY_KEY" && test -n "$KNOWN_HOSTS" && test -n "$DEPLOY_HOST"
           cd "$RUNNER_TEMP/release"
           sha256sum --check image.sha256
-          read -r image_id image_bytes upstream_base receiver_hash < release.txt
+          read -r image_bytes upstream_base receiver_hash archive_hash < release.txt
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
@@ -139,4 +140,4 @@ jobs:
           trap 'rm -f ~/.ssh/deploy' EXIT
           ssh -T -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes \
             -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 \
-            "root@$DEPLOY_HOST" "$GITHUB_SHA $image_id $image_bytes $upstream_base $receiver_hash" < image.tar.gz
+            "root@$DEPLOY_HOST" "$GITHUB_SHA $image_bytes $upstream_base $receiver_hash $archive_hash" < image.tar.gz

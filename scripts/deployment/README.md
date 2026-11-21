@@ -22,8 +22,10 @@ Pull requests run checks without server access. This workflow is limited to
    restrict,command="/usr/bin/python3 /opt/9router-render/ci/receive.py" ssh-ed25519 PUBLIC_KEY
    ```
 
-   The key submits the full fork commit, Docker image ID, image size, official base
-   commit and receiver checksum, followed by the CI image stream. Install the
+   The key submits the full fork commit, image size, official base commit, receiver
+   checksum and compressed-image SHA-256, followed by the CI image stream. The
+   receiver hashes the stream while loading it and verifies source/revision/base
+   labels. Docker image IDs are not portable across Engine versions. Install the
    checked receiver before releasing this workflow. An incompatible receiver or
    different image is rejected before cutover.
 4. In the GitHub `production` environment set secrets `DEPLOY_SSH_KEY` and
