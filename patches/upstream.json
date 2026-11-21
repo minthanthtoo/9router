@@ -3,6 +3,7 @@
   "branch": "master",
   "base": "1339107e624d1ab150c6a0c2c2ee22caa7e9db2f",
   "version": "0.5.116",
+  "npm_git_head": "1339107e624d1ab150c6a0c2c2ee22caa7e9db2f",
   "features": [
     {
       "id": "quota-observations",
@@ -112,7 +113,7 @@
       "id": "fork-deployment",
       "status": "fork-only",
       "depends_on": [],
-      "notes": "Production builds require the official tag and verified patch replay. Retain five verified Docker rollbacks, budget local deployment state, and verify retired snapshot archives.",
+      "notes": "Production builds require the official tag and verified patch replay. Retain five verified Docker rollbacks, budget local deployment state, and verify retired snapshot archives. The upstream update notice is advisory only; never install public npm over an unreviewed patched fork.",
       "entrypoints": [
         ".github/workflows/production.yml",
         "scripts/deployment/receive.py",
@@ -123,17 +124,52 @@
       ]
     },
     {
+      "id": "account-read-recovery-ui",
+      "status": "fork-only",
+      "depends_on": [
+        "quota-cards-and-controls"
+      ],
+      "entrypoints": [
+        "src/app/(dashboard)/dashboard/usage/components/ProviderLimits/index.js",
+        "src/shared/utils/accountReadStatus.mjs"
+      ],
+      "tests": [
+        "tests/rotation/account-read-status.test.mjs"
+      ],
+      "notes": "A failed account read preserves the last matching snapshot and reports unknown counts when the current filter has no successful read."
+    },
+    {
       "id": "patch-maintenance",
       "status": "fork-only",
       "depends_on": [],
       "entrypoints": [
         "docs/PATCH_MAINTENANCE.md",
         "scripts/patches/export.py",
-        ".github/workflows/patch-replay.yml"
+        "scripts/patches/check_upstream.py",
+        ".github/workflows/patch-replay.yml",
+        ".github/workflows/upstream-watch.yml"
       ],
       "tests": [
-        "scripts/patches/test_export.py"
+        "scripts/patches/test_export.py",
+        "scripts/patches/test_upstream_monitor.py"
       ]
+    },
+    {
+      "id": "upstream-update-review-notice",
+      "status": "fork-only",
+      "depends_on": [
+        "patch-maintenance"
+      ],
+      "entrypoints": [
+        "src/shared/components/Sidebar.js",
+        "src/shared/components/UpstreamUpdateNotice.js",
+        "src/shared/utils/upstreamUpdateNotice.mjs"
+      ],
+      "tests": [
+        "tests/rotation/upstream-update-notice.test.mjs",
+        "tests/rotation/ui.test.mjs"
+      ],
+      "notes": "Shows upstream release notes and states that patch compatibility is unverified. It never runs or copies a public npm install command."
     },
     {
       "id": "ready-groups-reset-fallback",

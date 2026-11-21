@@ -2,6 +2,7 @@
 import CapacityEvidence from '@/shared/components/CapacityEvidence.js';
 import {quotaDisplayTransition} from "@/shared/utils/quotaDisplayTransition";
 import { emptyRotation, rotationMetrics, availabilityGrouping } from "@/shared/utils/rotationSequence.mjs";
+import { accountReadErrorMessage, getAccountReadPresentation } from "@/shared/utils/accountReadStatus.mjs";
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
@@ -206,6 +207,7 @@ export default function ProviderLimits() {
   const [connections, setConnections] = useState([]);
   const [loadedConnectionScope, setLoadedConnectionScope] = useState("");
   const [connectionError, setConnectionError] = useState("");
+  const [sequenceError, setSequenceError] = useState("");
   const connectionRequest = useRef(0);
   const [quotaData, setQuotaData] = useState({});
   const [loading, setLoading] = useState({});
@@ -283,9 +285,9 @@ export default function ProviderLimits() {
   const [providerSequence,setProviderSequence]=useState(null);
   const imageManagement = useRef(null);
   useEffect(()=>{
-    if(providerFilter === "all"||!rotationMetrics(providerFilter).length){setProviderSequence(null);setRotationPreview(null);return;}
+    if(providerFilter === "all"||!rotationMetrics(providerFilter).length){setProviderSequence(null);setRotationPreview(null);setSequenceError("");return;}
     const controller=new AbortController();
-    fetch(`/api/providers/${encodeURIComponent(providerFilter)}/rotation?summary=1&model=${encodeURIComponent(imageModel)}`,{cache:"no-store",signal:controller.signal}).then(async response=>{if(!response.ok)throw Error();return response.json();}).then(data=>{if(controller.signal.aborted)return;setProviderSequence({provider:providerFilter,policy:data.effectivePolicy||data.policy});setQuotaSorts((data.effectivePolicy||data.policy)?.sorts||[]);setGroupAvailability(availabilityGrouping(data.effectivePolicy||data.policy));setResetPriority((data.effectivePolicy||data.policy)?.resetPriority||{enabled:false,days:3,weeklyBelow:null});setRotationPreview(null);}).catch(error=>{if(error.name!=="AbortError")setConnectionError("Saved provider sequence unavailable. Refresh to retry.");});
+    fetch(`/api/providers/${encodeURIComponent(providerFilter)}/rotation?summary=1&model=${encodeURIComponent(imageModel)}`,{cache:"no-store",signal:controller.signal}).then(async response=>{if(!response.ok)throw Error();return response.json();}).then(data=>{if(controller.signal.aborted)return;setSequenceError("");setProviderSequence({provider:providerFilter,policy:data.effectivePolicy||data.policy});setQuotaSorts((data.effectivePolicy||data.policy)?.sorts||[]);setGroupAvailability(availabilityGrouping(data.effectivePolicy||data.policy));setResetPriority((data.effectivePolicy||data.policy)?.resetPriority||{enabled:false,days:3,weeklyBelow:null});setRotationPreview(null);}).catch(error=>{if(error.name!=="AbortError")setSequenceError("Saved provider sequence unavailable. Card sorting remains available.");});
     return()=>controller.abort();
   },[providerFilter,imageModel]);
   const [serverRotationSegments, setServerRotationSegments] = useState(null);
@@ -361,7 +363,7 @@ export default function ProviderLimits() {
         const response = await fetch(
           `/api/providers/client?${params.toString()}`,
         );
-        if (!response.ok) throw new Error("Failed to fetch connections");
+        if (!response.ok) throw Object.assign(new Error(), { status: response.status });
 
         const data = await response.json();
         if (sequence !== connectionRequest.current) return null;
@@ -382,15 +384,10 @@ export default function ProviderLimits() {
         return connectionList;
       } catch (error) {
         if (sequence !== connectionRequest.current) return null;
-        setLoadedConnectionScope(connectionScope);
-        setConnectionError("Account and model counts are unavailable. Refresh to retry.");
-        setQuotaCatalog([]);
+        setConnectionError(accountReadErrorMessage(error));
+        setConnectionsLoading(false);
         console.error("Error fetching connections:", error);
-        setConnections([]);
-        setProviderOptions([]);
-        setPagination({ page: 1, pageSize, total: 0, totalPages: 1 });
-        setTotals({ eligibleConnections: 0, providerFilteredConnections: 0 });
-        return [];
+        return null;
       }
     },
     [accountFilter, page, pageSize, providerFilter, imageModel, imageModelProvider, imageModelCategory, connectionScope, resetListing, resetPriority, rotationPreview?.model, rotationPreview?.policy, rotationScope],
@@ -954,6 +951,14 @@ export default function ProviderLimits() {
   };
 
   const connectionsPageSummary = getConnectionsPaginationSummary(pagination);
+  const accountReadPresentation = getAccountReadPresentation({
+    failed: Boolean(connectionError),
+    scopePending,
+    count: sortedConnections.length,
+    pageSummary: connectionsPageSummary,
+    page: pagination.page,
+    totalPages: pagination.totalPages,
+  });
   const isCustomPageSize = !ACCOUNT_PAGE_SIZE_OPTIONS.includes(pageSize);
   const pageSizeLabel = getPageSizeLabel(pageSize, isCustomPageSize);
 
@@ -1020,7 +1025,7 @@ export default function ProviderLimits() {
             type="button"
             onClick={handleDisableDepleted}
             aria-label="Turn off empty accounts"
-            disabled={bulkToggling}
+            disabled={bulkToggling || Boolean(connectionError) || scopePending}
             className="flex h-9 shrink-0 items-center gap-1 rounded-lg border border-red-500/30 px-2 text-sm text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-50"
             title="Disable connections only when every reported quota on the current page is depleted"
           >
@@ -1033,7 +1038,7 @@ export default function ProviderLimits() {
             type="button"
             onClick={handleEnableAvailable}
             aria-label="Turn on available accounts"
-            disabled={bulkToggling}
+            disabled={bulkToggling || Boolean(connectionError) || scopePending}
             className="flex h-9 shrink-0 items-center gap-1 rounded-lg border border-emerald-500/30 px-2 text-sm text-emerald-500 transition-colors hover:bg-emerald-500/10 disabled:opacity-50"
             title="Enable connections with at least one reported quota that still has headroom"
           >
@@ -1116,15 +1121,19 @@ export default function ProviderLimits() {
           {allCardsCollapsed?'Show all sections':'Show only Summary'}
         </button>
         <span role="status" className="sr-only">{visibilitySaving?'Saving display preferences…':''}</span>
-        <span className="text-xs tabular-nums text-text-muted">{sortedConnections.length} cards on this page</span>
+        <span className="text-xs tabular-nums text-text-muted">{accountReadPresentation.cards}</span>
       </div>
 
       {visibilityError && <p role="alert" className="text-xs text-amber-500">{visibilityError}</p>}
-      {(scopePending || connectionsLoading) && <p role="status" className="py-6 text-sm text-text-muted">Loading matching accounts…</p>}
-      {connectionError && <p role="alert" className="text-sm text-amber-500">{connectionError}</p>}
+      {!connectionError && (scopePending || connectionsLoading) && <p role="status" className="py-6 text-sm text-text-muted">Loading matching accounts…</p>}
+      {sequenceError && <p role="alert" className="text-sm text-amber-500">{sequenceError}</p>}
+      {connectionError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-amber-500">
+        <span>{connectionError} {scopePending ? "Current account counts are unknown." : "Showing last-loaded account data."}</span>
+        <button type="button" onClick={() => refreshAll(true)} disabled={refreshingAll} className="rounded-md border border-amber-500/30 px-2 py-1 text-xs font-medium hover:bg-amber-500/10 disabled:opacity-50">{refreshingAll ? "Retrying…" : "Retry"}</button>
+      </div>}
       {!connectionError && !scopePending && !connectionsLoading && !sortedConnections.length && <div role="status" className="rounded-xl border border-border p-6 text-sm text-text-muted">No configured accounts match these filters. Clear the model or choose another category.</div>}
       <div ref={quotaGrid} id="quota-account-cards" className="grid grid-cols-1 items-start md:grid-cols-2 gap-3" aria-label="Account segments">
-      {visibleSegments.flatMap((segment,index)=>[
+      {(accountReadPresentation.showCards ? visibleSegments : []).flatMap((segment,index)=>[
         ...(showSegmentBars ? [<QuotaSegmentBar key={`segment-${segment.key}`} segment={segment} previousSegment={visibleSegments[index-1]} index={index} total={visibleSegments.length} previous={visibleSegments[index-1]?.key} next={visibleSegments[index+1]?.key} covered={index<=activeSegmentIndex} onNavigate={jumpToSegment} />] : []),
         ...segment.connections.map((conn) => {
           const collapsed = !cardGroupVisible(quotaVisibility,conn.id,"images",legacyCardCollapse);
@@ -1433,7 +1442,7 @@ export default function ProviderLimits() {
 
       <div className="rounded-xl border border-black/10 bg-black/[0.02] px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs text-text-muted">{connectionsPageSummary}</span>
+            <span className="text-xs text-text-muted">{accountReadPresentation.page}</span>
             <div className="flex flex-wrap items-center gap-2">
               <select
                 value={isCustomPageSize ? "custom" : String(pageSize)}
@@ -1491,7 +1500,7 @@ export default function ProviderLimits() {
                 aria-label="Custom accounts per page"
                 placeholder="Custom"
               />
-              <span className="text-xs text-text-muted">Page {pagination.page} / {pagination.totalPages}</span>
+              <span className="text-xs text-text-muted">{accountReadPresentation.pagination}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <button

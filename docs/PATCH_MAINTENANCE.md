@@ -16,6 +16,9 @@ and records feature dependencies and regression entry points.
   consent, durable reset ledger and recovery tests must travel together.
 - The production workflow, restricted deployment receiver and environment setup
   are fork-specific. Never include them in an unrelated official feature PR.
+- The dashboard's npm version notice is advisory. It links to official release notes
+  and does not install; upgrade a patched fork only through the compatibility review
+  and replay process below.
 - Some legacy integration names remain in the source. Their presence does not make
   an external application a runtime dependency; evaluate each before upstreaming.
 
@@ -175,3 +178,9 @@ divisions. Turning this display grouping off preserves sequence order.
 
 Fork CI checks master pushes and pull requests. Deliberate releases use a manual
 dispatch with deploy enabled; AUTO_DEPLOY can opt back into master-push releases.
+
+The scheduled upstream watcher compares stable Git tags and npm `version` plus
+`gitHead` with `patches/upstream.json`. A mismatch opens one assigned review issue
+per source snapshot. It does not rebase patches or deploy; compatibility work and
+the normal checked merge remain deliberate steps. Keep the Codex monitor active
+until the watcher is on `master` and its first scheduled run is verified.

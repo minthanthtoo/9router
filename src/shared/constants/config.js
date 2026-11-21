@@ -13,12 +13,9 @@ export const GITHUB_CONFIG = {
   donateUrl: "https://9router.com/api/donate",
 };
 
-// Updater configuration
+// Runtime settings for the CLI updater and local app endpoint.
 export const UPDATER_CONFIG = {
   npmPackageName: "9router",
-  installCmd: "npm i -g 9router",
-  installCmdLatest: "npm i -g 9router@latest --prefer-online",
-  shutdownCountdownSec: 3,
   exitDelayMs: 500,
   statusPort: 20129,
   statusPollIntervalMs: 1000,

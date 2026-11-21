@@ -1,0 +1,81 @@
+name: Official upstream release watch
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/upstream-watch.yml'
+      - 'patches/upstream.json'
+      - 'scripts/patches/check_upstream.py'
+      - 'scripts/patches/test_upstream_monitor.py'
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      notify:
+        description: Create an issue if an upstream change needs review
+        type: boolean
+        default: false
+
+concurrency:
+  group: upstream-watch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  inspect:
+    if: github.repository == 'minthanthtoo/9router'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      review-required: ${{ steps.upstream.outputs.review-required }}
+      pinned-version: ${{ steps.upstream.outputs.pinned-version }}
+      pinned-base: ${{ steps.upstream.outputs.pinned-base }}
+      latest-tag-version: ${{ steps.upstream.outputs.latest-tag-version }}
+      latest-tag-sha: ${{ steps.upstream.outputs.latest-tag-sha }}
+      npm-version: ${{ steps.upstream.outputs.npm-version }}
+      npm-git-head: ${{ steps.upstream.outputs.npm-git-head }}
+      reasons: ${{ steps.upstream.outputs.reasons }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test release comparison
+        run: python3 -B -m unittest discover -s scripts/patches -p 'test_upstream_monitor.py'
+      - name: Compare official tags and npm metadata
+        id: upstream
+        run: python3 -B scripts/patches/check_upstream.py
+
+  notify:
+    needs: inspect
+    if: >-
+      needs.inspect.outputs.review-required == 'true' &&
+      (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.notify == true))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Notify on new upstream review
+        uses: actions/github-script@v7
+        env:
+          PINNED_VERSION: ${{ needs.inspect.outputs.pinned-version }}
+          PINNED_BASE: ${{ needs.inspect.outputs.pinned-base }}
+          TAG_VERSION: ${{ needs.inspect.outputs.latest-tag-version }}
+          TAG_SHA: ${{ needs.inspect.outputs.latest-tag-sha }}
+          NPM_VERSION: ${{ needs.inspect.outputs.npm-version }}
+          NPM_GIT_HEAD: ${{ needs.inspect.outputs.npm-git-head }}
+          REASONS: ${{ needs.inspect.outputs.reasons }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const title = `9Router upstream review: tag v${process.env.TAG_VERSION} / npm ${process.env.NPM_VERSION} (${process.env.TAG_SHA.slice(0, 7)}-${process.env.NPM_GIT_HEAD.slice(0, 7)})`;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', per_page: 100
+            });
+            if (issues.some(issue => !issue.pull_request && issue.title === title)) {
+              core.info(`Already tracking this upstream snapshot: ${title}`);
+              return;
+            }
+            const body = `An official 9Router source release differs from the pinned patch base.\n\n- Pinned fork base: v${process.env.PINNED_VERSION} (${process.env.PINNED_BASE})\n- Latest official Git tag: v${process.env.TAG_VERSION} (${process.env.TAG_SHA})\n- Latest npm package: ${process.env.NPM_VERSION} (gitHead ${process.env.NPM_GIT_HEAD})\n- Review reason: ${process.env.REASONS || 'source metadata changed'}\n\nThis is a notice only. No patch was rebased, merged, or deployed. Prepare and test an isolated compatibility candidate before updating \`master\`; a reviewed merge then uses the existing checked deployment workflow.\n\nSources: [official tags](https://github.com/decolua/9router/tags) · [npm package](https://www.npmjs.com/package/9router)`;
+            await github.rest.issues.create({ owner, repo, title, body, assignees: [owner] });

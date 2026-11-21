@@ -160,3 +160,18 @@ test('reset step shifts quota priorities and uses criteria groups before the fir
  assert.equal(screen.queryByRole('button',{name:'Divide before Weekly reset: Largest gap'}),null);
  cleanup();
 });
+
+test('upstream update notice is review-only and does not offer an installer',async()=>{
+ const React=requireFront('react'),{render,screen,cleanup}=requireFront('@testing-library/react');
+ const Notice=await harness('UpstreamUpdateNotice');
+ const {container}=render(React.createElement(Notice,{latestVersion:'0.5.119'}));
+ assert.ok(screen.getByText('Upstream package v0.5.119 available'));
+ assert.ok(screen.getByText(/Compatibility with this patched fork has not been verified/));
+ assert.equal(screen.getByRole('link',{name:'View official release notes'}).getAttribute('href'),'https://github.com/decolua/9router/releases');
+ assert.equal(screen.queryByRole('button',{name:/update now|install/i}),null);
+ assert.doesNotMatch(container.textContent,/npm i -g/i);
+ cleanup();
+ render(React.createElement(Notice,{latestVersion:'invalid'}));
+ assert.equal(screen.queryByRole('region',{name:'Official update notice'}),null);
+ cleanup();
+});
