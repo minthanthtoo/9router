@@ -5,6 +5,12 @@ on:
     branches: [master]
   push:
     branches: [master]
+    # CI-only changes are checked on PR/manual runs and never churn the server image.
+    paths-ignore:
+      - '.github/workflows/production.yml'
+      - '.github/workflows/upstream-watch.yml'
+      - 'scripts/patches/check_upstream.py'
+      - 'scripts/patches/test_upstream_monitor.py'
   workflow_dispatch:
     inputs:
       deploy:

@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       notify:
-        description: Create an issue if an upstream change needs review
+        description: Create an issue if enabled; otherwise report it in the Actions summary
         type: boolean
         default: false
 
@@ -78,4 +78,19 @@ jobs:
               return;
             }
             const body = `An official 9Router source release differs from the pinned patch base.\n\n- Pinned fork base: v${process.env.PINNED_VERSION} (${process.env.PINNED_BASE})\n- Latest official Git tag: v${process.env.TAG_VERSION} (${process.env.TAG_SHA})\n- Latest npm package: ${process.env.NPM_VERSION} (gitHead ${process.env.NPM_GIT_HEAD})\n- Review reason: ${process.env.REASONS || 'source metadata changed'}\n\nThis is a notice only. No patch was rebased, merged, or deployed. Prepare and test an isolated compatibility candidate before updating \`master\`; a reviewed merge then uses the existing checked deployment workflow.\n\nSources: [official tags](https://github.com/decolua/9router/tags) · [npm package](https://www.npmjs.com/package/9router)`;
-            await github.rest.issues.create({ owner, repo, title, body, assignees: [owner] });
+            try {
+              const issue = await github.rest.issues.create({ owner, repo, title, body, assignees: [owner] });
+              await core.summary
+                .addHeading('Upstream review notification', 3)
+                .addRaw(`Created [${title}](${issue.data.html_url}) and assigned it to @${owner}.`)
+                .write();
+              core.notice(`Official 9Router update needs review: ${title}`);
+            } catch (error) {
+              if (error.status !== 410 || !/Issues has been disabled/i.test(error.message || '')) throw error;
+              core.warning('Repository Issues are disabled. The upstream update is recorded in this Actions run summary; no public notification was created.');
+              core.notice(`Official 9Router update needs review: ${title}`);
+              await core.summary
+                .addHeading('Upstream update detected; issue notification unavailable', 2)
+                .addRaw(`The repository has Issues disabled, so GitHub cannot create the owner-assigned review issue. This run records the update in its summary; enable Issues if you want an issue notification.`)
+                .write();
+            }
